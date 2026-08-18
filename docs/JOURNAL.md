@@ -453,3 +453,8 @@ zero changes: a new module plugs straight in.
 
 **Presence agent remains DISABLED** (would false-pause movies with a blind
 radar). Playback is protected.
+
+**Confirmation (later same day)**: module tested on the Raspberry Pi 4B
+(kit@192.168.80.144, /dev/ttyS0 @256000) — identical result: streams
+225 frames, zero detections at point-blank range. Both boards agree ⇒ the
+module's RF front-end is faulty, not the 5C. Replacement required.
