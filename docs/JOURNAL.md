@@ -260,3 +260,39 @@ Smart-presence layer on the same box: RD-03D 24GHz mmWave radar (UART, multi-tar
 - **Same-version rebuilds don't protect against apt replacement** — `apt-mark hold` is mandatory for any locally-built package that keeps the distro version string, and holds can silently vanish; verify after every apt session.
 - **A kodi that's "up but ignoring keyboard/CEC/web" is a wedged kodi** — check `ss -tln` for a growing accept queue on 9090 as the signature; restart kodi, don't reboot the board.
 - gdb on a stripped binary + separate .debug build-id file works well; optimize-out makes variables unreliable — plan breakpoint-by-line and read `disassemble /s` instead.
+
+### 13. CEC won't connect when TV was off at boot (2026-08-18) — FIXED
+
+**Symptom**: boot the 5C with the TV powered off → later power the TV on →
+TV remote does nothing (CEC dead). Restarting kodi alone does NOT fix it.
+
+**Root cause** (verified live): the dw-hdmi-qp kernel driver derives the CEC
+physical address from the TV's EDID. TV off at boot → no EDID → CEC adapter
+registers as `f.f.f.f` (unregistered) → libCEC can't claim a logical address
+(`Logical Address Mask: 0x0000`) → and the driver never re-syncs the CEC
+notifier when the TV later hotplugs. Signature check:
+
+    cec-ctl -d 0 --logical-addresses
+      → "Physical Address: f.f.f.f" / "Logical Address Mask: 0x0000"
+      → "Logical Address: Not Allocated"
+
+**The kick** (works ~5s, verified by user replug test):
+
+    sudo sh -c 'echo detect > /sys/class/drm/card0-HDMI-A-1/status'
+
+Forces a full DRM connector re-detect → driver re-reads EDID → CEC notifier
+re-syncs → phys addr becomes `1.0.0.0`, logical address claimed, remote works.
+
+**Automation** — `cec-watch.sh` + systemd timer every 30s:
+- only acts when: TV connected AND CEC still `f.f.f.f` AND kodi not playing
+  (JSON-RPC `Player.GetActivePlayers` guard → never blinks video mid-movie)
+- `cec-watch.timer`: OnBootSec=90, OnUnitActiveSec=30, Persistent
+- `cec-watch.service` also runs once after kodi.service (catches early TV-on)
+
+**Lessons**:
+- "TV was off at boot" breaks CEC in a way a kodi restart can't fix — the
+  stale state lives in the kernel driver, not libCEC. Kick the DRM connector.
+- `echo detect` to the connector status sysfs is the reliable re-trigger
+  (no udev uevent fires on this platform, so polling beats udev rules).
+- Always guard display-affecting kicks with a playback check; defer is fine
+  (timer retries every 30s).
