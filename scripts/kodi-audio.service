@@ -1,0 +1,12 @@
+[Unit]
+Description=Point Kodi audio at the Chord Qutest DAC
+After=kodi.service
+Requires=kodi.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/set-kodi-audio.py
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
