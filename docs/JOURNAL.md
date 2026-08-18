@@ -1,18 +1,19 @@
 # Rock 5C Kodi Home Theater — Complete Build Journal
 
-**Date**: 2026-08-16 (multi-day project)
+**Date**: 2026-08-16 → 2026-08-18 (multi-day project)
 **Board**: Radxa Rock 5C Lite (RK3588S2, 2GB RAM)
 **OS**: `rock-5c_bookworm_cli_r3` (Radxa Debian 12 CLI image)
 **Goal**: 4K HDR hardware-decoding Kodi player → Sony BRAVIA TV, Chord Qutest DAC, NFS media library, TV-remote (CEC) control
+**Published**: https://github.com/kitcChu/rock5c-kodi-hdr
 
-**Final status**: ✅ Working — 4K 10-bit HDR HEVC hardware decode on video plane, ~18% CPU, bit-perfect audio to Qutest, 24Hz sync for films, 60Hz GUI, CJK fonts, USB keyboard, HDMI-audio fallback.
+**Final status**: ✅ Working — 4K 10-bit HDR10 HEVC hardware decode on video plane (with full HDR10 metadata signalling), ~18% CPU, bit-perfect audio to Qutest, seek/pause-free, 24Hz sync for films, 60Hz GUI, CJK fonts, USB keyboard, HDMI-audio fallback.
 
 ---
 
 ## Final architecture
 
 ```
-NFS server (LAN)
+NFS server (192.168.80.148)
    └─ /mnt/multimedia (nfs4, automount, nofail)
 Rock 5C (kodi.service, autostart → GBM)
    ├─ Video: hevc_rkmpp (libavcodec59, custom build)
@@ -36,6 +37,13 @@ Hardware decode needed **four independent fixes**, each masked by the previous o
 | 2 | Kernel boot | Only **8MB CMA** → 4K 10-bit DMA buffers can't allocate (`ENOSPC`) | `cma=512M` in `/etc/kernel/cmdline` + `u-boot-update` |
 | 3 | ffmpeg rkmppdec.c | **Packet-drop deadlock**: on `MPP_ERR_BUFFER_FULL` the code pulled a NEW packet; mpp's contract requires retrying the SAME packet after draining output → decoder starves after ~4 frames | pending-packet retry in `rkmpp_receive_frame` |
 | 4 | ffmpeg rkmppdec.c | **HDR format bit**: HDR streams report `MPP_FMT = 0x04000001` (HDR bit 26 set); the format switch didn't mask it → DRM format 0 → renderer rejected → GL fallback → SIGSEGV in `memcpy` | mask with `MPP_FRAME_FMT_MASK` + map 10-bit → `DRM_FORMAT_NV15` |
+
+Two more found later (each also masked by earlier ones):
+
+| # | Layer | Bug | Fix |
+|---|---|---|---|
+| 5 | ffmpeg rkmppdec.c | **Seek/pause freeze**: after `mpi->reset()` mpp returns garbage PTS (`18442xxxx` values) → video clock explodes, screen freezes while audio follows the seek | reset wrapper state on flush + sanitize negative/garbage PTS to last-fed PTS |
+| 6 | ffmpeg rkmppdec.c | **HDR10 metadata never reached the TV** (blob eotf=2 but all-zero luminance/primaries → dim flat picture): MKV stores mastering data in the HEVC SEI (bitstream), not container side-data; and SEI fields are **big-endian u16** | dual-format (hvcC + Annex-B) NAL scanner with emulation-prevention stripping; SEI types 137/144 parsed and attached to frames as side data |
 
 ---
 
@@ -218,16 +226,31 @@ Goal was phone control (Kore) with TV off. Findings:
 7. The reinstall itself hard-crashed the board twice during the 36-deb `dpkg -i` sweep (heavy SD writes; journal corrupted on each; no mmc/ext4 I/O errors in dmesg). Board recovered via power-cycle both times. Prefer staged installs (a few debs at a time) on this board.
 8. **Kodi wedge #2 (2026-08-17 ~11:4x)**: kodi process alive, ports listening, but RPC/input/CEC all dead — 9090 accept-queue backed up (3 pending). Triggered by remote `Player.Open` switching audio sources while DSD was playing. Recovery: `systemctl restart kodi`. Rule: never drive playback via raw JSON-RPC on this build — user controls playback via Kore/GUI.
 9. **Kodi died once to an external POSIX signal** (11:23, log: "Quitting due to POSIX signal") — likely systemd stop/OOM under library-scan + DSD playback; board itself stayed up.
+10. **Webserver toggle remotely = wedge** — see §11; GUI toggle is fine and Kore works. JSON-RPC `SetSettingValue` on action-type settings (screenmode, webserver) fails or hangs in this build — value-type settings set fine.
+11. **Board hard-rebooted once (04:50) during webserver debugging** — kodi restart under gdb-attach strain; no OOM logged.
+12. **Five unexplained reboots during 2026-08-17/18 builds — root cause: thermal.** All five happened during/after 20-min `-j6` package builds; no OOM, no ext4 errors, no kernel panic lines. Resolution: user fitted a CPU heatsink (it was a hot mid-summer day); temps now 57–64°C under full 4K HDR playback load (throttle point ~85°C). **No reboots since.** RK3588S needs passive cooling at minimum for sustained 8-core builds.
 
-6. **Webserver toggle remotely = wedge** — see §11; GUI toggle is fine and Kore works. JSON-RPC `SetSettingValue` on action-type settings (screenmode, webserver) fails or hangs in this build — value-type settings set fine.
-7. **Board hard-rebooted once (04:50) during webserver debugging** — kodi restart under gdb-attach strain; no OOM logged.
+## Post-publish additions (2026-08-18)
+
+- **Seek/pause screen-freeze fixed** (root cause #5 above): video PTS garbage after mpp reset; verified via standalone C reproducer (`scripts/seektest.c` in the GitHub repo): before patch P2 frames carried garbage, after: `bad=0 of 21`; live seeks ±60s and pause/resume confirmed advancing.
+- **HDR10 metadata chain completed** (root cause #6): Kodi's `SetHDR` was emitting eotf=2 with zeroed luminance/primaries → dim flat picture on HDR titles. Two-stage debug: (a) discovered MKV stream-level side_data is EMPTY — ffprobe's "stream side data" output had actually been frame-level side data from the software decoder path; (b) wrote a dual-format SEI scanner (hvcC length-prefix + Annex-B, emulation-prevention stripped) into rkmppdec; first version had a BE-u16-as-u32 bug (blob showed `max_cll=512, max_fall=13250` — shifted values), fixed with proper `sei_read_u16`. Final blob verified bit-exact vs ffprobe: BT.2020 primaries, D65 white, 4000-nit max, CLL 577/512. User confirmed brightness/contrast visibly improved on multiple HDR titles.
+- **Project published**: https://github.com/kitcChu/rock5c-kodi-hdr — README (root-cause table + benchmarks), docs/SETUP.md (full walkthrough), docs/JOURNAL.md (this file, PII-scrubbed), all patches, shim source, helper scripts. PII audit done; `.env` gitignored with `.env.example` template.
+- **Audio**: bit-perfect confirmed by DAC-side rate switching (44.1k FLAC, 48k film, 352.8k DXD); `audiooutput.config=0` (Best Match) — the earlier "dry, unnatural" sound was the 44.1→48 resampler.
+
+## Queued next project (not started)
+
+Smart-presence layer on the same box: RD-03D 24GHz mmWave radar (UART, multi-target people counting) + Logitech C922 webcam (face ID via rknnlite2 on the NPU) + C922 mics (voice commands, English + Cantonese). Design decisions made: pause-after-3-min-empty policy (A/B/C ladder pending user choice), radar gates the camera to save RAM. Key facts gathered: RD-03D protocol = binary `AA FF 03 00 [T1..T3] 55 CC` @256000 baud (V1) or JSON (V2), 3 targets, x/y/speed/distance each; rknpu driver + rknnlite 2.3.0 already on the board; uart overlays via `/boot/dtbo/*uart*.disabled` + rsetup.
 
 ## Lessons learned
 
 - **"Feature missing" can mean "registration never called"** — binary forensics (strings/objdump/dbgsym) beat source archaeology for closed distributions. The decoder existed all along; one build flag orphaned it.
 - **mpp's decode contract requires same-packet retry on BUFFER_FULL** — every integration that drops-and-advances deadlocks after exactly a few frames.
 - **HDR flag bits ride in MppFrameFormat** — always mask with `MPP_FRAME_FMT_MASK` before switching on format.
+- **MKV HDR metadata lives in the bitstream (SEI), not the container** — and SEI numeric fields are big-endian u16; mis-sized reads desync the whole message stream (symptom: plausible-but-shifted values).
+- **"Dim HDR" is a metadata problem, not a decode problem** — pixels can be perfectly decoded while the TV tone-maps blind because luminance/primaries never reached the HDMI infoframe.
+- **Verify ffprobe output format assumptions** — `-show_entries side_data` matches BOTH stream- and frame-level sections; a frame-side-data dump masqueraded as stream-side-data and sent the debug down a wrong (but educational) path.
 - **Radxa images need explicit CMA sizing** for media work (default 8MB is for headless use).
+- **RK3588S passive-cooled needs a heatsink for sustained builds** — five mystery reboots across two days were all thermal; zero since adding one.
 - On 2GB boards: swap + stop kodi + `-j6` for package builds; systemd restart loops from loader errors (exit 127) = broken LD_PRELOAD .so.
 - **Same-version rebuilds don't protect against apt replacement** — `apt-mark hold` is mandatory for any locally-built package that keeps the distro version string, and holds can silently vanish; verify after every apt session.
 - **A kodi that's "up but ignoring keyboard/CEC/web" is a wedged kodi** — check `ss -tln` for a growing accept queue on 9090 as the signature; restart kodi, don't reboot the board.
