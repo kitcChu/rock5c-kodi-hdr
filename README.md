@@ -110,6 +110,46 @@ cc -shared -fPIC -O2 -I/usr/include/libdrm -o /usr/lib/aarch64-linux-gnu/kodi-sh
 - librockchip-mpp 1.7.0, kernel 6.1.84-8-rk2410
 - Sony BRAVIA (4K60, HDR10), Chord Qutest USB DAC
 
+## Roadmap / TODO
+
+Ideas we're actively interested in — see something you could build? Jump in (see Contributing).
+
+- [ ] **AV1 hardware decoding** — RK3588S has a dedicated AV1 decoder block (`mpp_av1dec fdc70000.av1d` probes successfully on this kernel).
+      Needs: ffmpeg `av1_rkmpp` decoder glue in the same patched tree (Rockchip has a reference in
+      their FFmpeg forks), verify CMA/DMA-heap path for AV1 reference frames (they're larger),
+      and NV15 scanout for 10-bit AV1. Test files: any AV1 WEB-DL.
+- [ ] **AI presence layer — “who is watching TV”**
+      - 24 GHz mmWave radar (Ai-Thinker RD-03D, ~US$15, UART) for multi-target people
+        counting incl. stationary people → auto-pause when the room empties
+      - Face recognition via the RK3588 NPU (`rknnlite2` 2.3.0 is already installed on this
+        image) with a USB webcam → per-viewer profiles, viewing stats
+      - Voice control (wake word + English/Cantonese commands) through the same mic
+      - Design constraint on 2 GB RAM: radar gates the camera — face inference only runs
+        when the radar says someone is present
+- [ ] HDR10+ / Dolby Vision dynamic metadata passthrough (static HDR10 done)
+- [ ] Re-derive shim offsets automatically from `kodi-bin-dbgsym` at install time, so
+      Kodi security updates don't require a manual fix
+- [ ] Proper Debian source package (`debian/patches/` series) instead of inline patch
+      scripts, for cleaner `apt-get source` workflow
+
+## Contributing
+
+Issues and PRs are welcome — especially:
+
+- **Bug reports**: kodi.log excerpt + `scripts/decode_blob.py` output + which of the four
+  root causes' symptoms you see, and your exact kodi/ffmpeg/kernel versions. The shim
+  offsets are build-ID-locked — include `readelf -n /usr/lib/aarch64-linux-gnu/kodi/kodi.bin`.
+- **New features** from the roadmap above (or your own): open an issue first with your
+  approach so we can align before you write code. RK3588-family boards other than the
+  5C are in scope — the rkmpp patches apply to any board with `mpp_service` + `rkvdec2`.
+- **Other distros/versions**: Kodi 21 (Nexus+), mainline-kernel images (LibreELEC-style
+  stacks without rkmpp), non-Debian — a PR porting any piece is a PR worth merging.
+- **Ideas & suggestions** (no code needed): open an issue with the `[idea]` label —
+  e.g. better voice stack for Cantonese, smarter pause policies, Godzilla-2014-style
+  flicker diagnosis. Half the fixes in this repo exist because a symptom looked weird.
+
+No CLA; keep patches MIT/LGPL-compatible. Small, focused PRs beat large rewrites.
+
 ## Known limitations
 
 - Shim offsets break on any Kodi package upgrade (re-derive from dbgsym — see docs).
