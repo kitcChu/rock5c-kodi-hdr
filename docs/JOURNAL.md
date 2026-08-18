@@ -13,7 +13,7 @@
 ## Final architecture
 
 ```
-NFS server (192.168.80.148)
+NFS server (LAN)
    └─ /mnt/multimedia (nfs4, automount, nofail)
 Rock 5C (kodi.service, autostart → GBM)
    ├─ Video: hevc_rkmpp (libavcodec59, custom build)
