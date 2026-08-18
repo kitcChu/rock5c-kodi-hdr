@@ -434,3 +434,22 @@ Movie playback restored (speed=1).
    long stable EMPTY, and default OFF (opt-in toggle).
 3. Consider: never auto-pause if a child is known-present; log every action
    for auditability.
+
+### 18. RD-03D module failure — RF detection dead (2026-08-18)
+
+**Symptom**: module streams empty frames (`AA FF 03 00` + 24 zero bytes +
+`55 CC`) at 256000, but detects NOTHING — not even a hand 5-20cm away.
+Was working 30 minutes prior (detected count=2, real x/y/speed data).
+
+**Isolated**: wiring proven (frames flow, UART6 mux permanent); power-cycle,
+full 30s power-off, wire re-seat, and restore commands (`FD FC FB FB 05...`
+factory, sensitivity/range variants) all failed to restore detection.
+Module not hot; does not respond to any command.
+
+**Conclusion**: RF front-end failure, likely from today's handling (repeated
+plug/unplug during the pin saga + brief wrong-voltage moments). Replacement
+is the fix — RD-03D is ~HK$30-40 and our infra (mux, UART6, agent) needs
+zero changes: a new module plugs straight in.
+
+**Presence agent remains DISABLED** (would false-pause movies with a blind
+radar). Playback is protected.
