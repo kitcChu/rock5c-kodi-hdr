@@ -357,3 +357,39 @@ Fixes in the new version:
 **Lesson**: field-index bugs in awk parsers are invisible when the program
 only acts on one specific value — always log what you parsed, and test both
 the "needs action" and "no action" branches.
+
+### 16. RD-03D radar: the UART6-M1 mux saga (2026-08-18) — FIXED & LIVE
+
+The RD-03D (V1 binary protocol) now streams into `/dev/ttyS6` at 256000 baud
+and the presence agent is live. The path there was long; the root causes were
+two independent hardware/kernel gotchas:
+
+**Gotcha 1 — RK3588 IOC write pattern.** The kernel's pinctrl driver claims
+the UART6-M1 pins and reports them muxed, but the hardware IOMUX register
+stays at GPIO function. Root cause found via kernel source
+(`pinctrl-rockchip.c`): RK3588 IOC registers require a **write pattern —
+upper 16 bits = mask, lower 16 bits = value**. Plain writes (and plain
+`/dev/mem` pokes, and naive kernel modules) are silently ignored. Verified:
+`write 0xFF0000AA → 0xFD5F8020` sets GPIO1_A0/A1 to UART6 (func 10).
+Fixed by `presence-agent/fix/uart6m1-mux.py` (systemd oneshot at boot) plus
+`/boot/boot.scr` `mw.l 0xFD5F8020 0xFF0000AA` in U-Boot as belt-and-braces.
+
+**Gotcha 2 — mux gets clobbered.** Any GPIO request on pins 19/21 (e.g. an
+early `gpioset` experiment) makes the pinctrl driver switch the pins back to
+GPIO function, silently killing UART6 on the header. Symptom: `/dev/ttyS6`
+exists, loopback works through a 19↔21 short, but no external device is ever
+seen. The `uart6m1-mux.service` re-asserts the mux at boot; do NOT use
+gpioset/gpioget on pins 19/21 afterwards (or re-run the fix).
+
+**Board-side debugging tools that were essential** (all in /tmp during the
+hunt, worth re-creating): read IOC registers via `/dev/mem` mmap; the kernel
+regmap view at `/sys/kernel/debug/regmap/dummy-syscon@0x00000000fd5f0000/registers`
+(the authoritative driver view); the `lseek+read` on `/dev/mem` fails with
+EFAULT but mmap works; GPIO EXT registers do NOT reflect muxed pins.
+
+**Also learned**: the RD-03D streams continuously at 256000
+(`AA FF 03 00` + 24-byte body + `55 CC`, ~11 fps) — no config command
+needed. Body: up to 3 targets (x/y int16 LE, speed int8) then distance/
+status bytes. The module was validated standalone on a Raspberry Pi 4B
+(kit@192.168.80.144, `/dev/ttyS0` @256000) before returning to the 5C —
+that proved module+wires were healthy and isolated the problem to the 5C.

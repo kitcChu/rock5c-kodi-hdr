@@ -1,0 +1,27 @@
+[Unit]
+Description=Presence agent (RD-03D radar + C922 presence gating)
+# Never let presence work disturb Kodi:
+After=multi-user.target
+Wants=multi-user.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/presence-agent/presence_agent.py
+Restart=on-failure
+RestartSec=3
+# hard resource caps: presence must NEVER starve Kodi
+MemoryMax=512M
+CPUQuota=50%
+Nice=10
+IOSchedulingClass=idle
+# don't let a hung serial read wedge kodi's IO
+TimeoutStopSec=10
+KillSignal=SIGINT
+
+# journald output (also see /var/log/presence-agent.log via journald)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

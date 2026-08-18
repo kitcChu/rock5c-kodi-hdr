@@ -1,0 +1,14 @@
+[Unit]
+Description=Assert UART6-M1 IOMUX on Rock 5C (pins 19/21)
+# Must run after the pinctrl/serial drivers have probed (they may clobber the mux)
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/uart6m1-mux.py
+# Re-assert if something re-programs the IOC (e.g. GPIO use of these pins)
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
