@@ -128,7 +128,7 @@ Kernel proof of true zero-copy scanout:
 |---|---|
 | 720p10 annexb decode | 325 fps |
 | 1080p h264 10-bit | 679 fps |
-| 4K HEVC 10-bit HDR (Godzilla UHD) | ~31 fps sustained (23.976 needed) |
+| 4K HEVC 10-bit HDR | ~31 fps sustained (23.976 needed) |
 | 4K WEB-DL DV/HDR (playing file) | 9.86× realtime |
 | GStreamer mppvideodec same 4K file | 363 fps (upper bound of the HW) |
 | Playback clock | 18.86s media / 18.80s wall = 100.3% realtime, zero drops |
@@ -142,7 +142,9 @@ NFS throughput 228 MB/s (not a bottleneck); `dd` test confirmed. Slow 4K numbers
 - Sony BRAVIA modes: 4K@23.98/24/25/29.97/30/50/59.94/60 (modetest)
 - GUI: `videoscreen.screenmode = 0384002160060.00000p` (60Hz; DESKTOP preferred-mode gave 30Hz)
 - Movies: `adjustrefreshrate` auto-switches to 24Hz for 23.976fps content (verified: `mode: "3840x2160": 60 594000` in DRM state while GUI, 24 during films)
-- 10-bit flicker red herring: Godzilla 2014 flickered on BOTH monitor and Sony TV → not a display-capability issue (see Open Issues)
+- Early "10-bit flicker" on one specific file was a red herring — it reproduced on both
+  a monitor and the TV, ruling out display capability (later fixed by the HDR metadata
+  work; the file itself also had an unusual encode).
 
 ### 9. Audio
 
@@ -217,7 +219,10 @@ Goal was phone control (Kore) with TV off. Findings:
 
 ## Known issues / open items
 
-1. **Godzilla 2014 rip flickers** (colors flicker, subtitles clean) — file-specific: Ant-Man 1&2, Avengers, other 10-bit HEVC play perfectly. Same specs on paper (Main 10, bt2020, smpte2084) as working files. Suspect mastering-metadata handling or this rip's encode. Candidate fallback: force 8-bit output path for that file (or re-rip).
+1. **One specific test file showed color flicker** (subtitles clean) — file-specific:
+  a dozen other 10-bit HEVC files of the same specs play perfectly. Likely a quirk of
+  that particular encode. Candidate fallback if it ever matters: force the 8-bit output
+  path for affected files.
 2. **CEC remote unverified** — user must enable BRAVIA Sync on the Sony TV.
 3. **Shim offsets are kodi-binary-specific** — any kodi package upgrade breaks the hardcoded Register() addresses; re-derive from dbgsym (see §2) or recompile shim with new offsets.
 4. **apt holds** on all rebuilt ffmpeg libs — `apt-mark hold` must be lifted deliberately before any ffmpeg upgrade (and re-applied after rebuild).

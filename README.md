@@ -145,15 +145,16 @@ Issues and PRs are welcome — especially:
 - **Other distros/versions**: Kodi 21 (Nexus+), mainline-kernel images (LibreELEC-style
   stacks without rkmpp), non-Debian — a PR porting any piece is a PR worth merging.
 - **Ideas & suggestions** (no code needed): open an issue with the `[idea]` label —
-  e.g. better voice stack for Cantonese, smarter pause policies, Godzilla-2014-style
-  flicker diagnosis. Half the fixes in this repo exist because a symptom looked weird.
+  e.g. better voice stack for Cantonese, smarter pause policies, odd per-file
+  rendering quirks. Half the fixes in this repo exist because a symptom looked weird.
 
 No CLA; keep patches MIT/LGPL-compatible. Small, focused PRs beat large rewrites.
 
 ## Known limitations
 
 - Shim offsets break on any Kodi package upgrade (re-derive from dbgsym — see docs).
-- One UHD rip (Godzilla 2014) shows color flicker; a dozen others are clean.
+- Some individual non-reference HEVC encodes may show rendering artifacts; a dozen
+  test files across encoders were clean.
 - `avcodec-extra59` owns `libavcodec.so.59` on this image — install that flavor, and
   `apt-mark hold` it (an innocent `apt-get install libavcodec-dev` silently reverts
   everything to stock).

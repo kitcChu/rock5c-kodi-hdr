@@ -18,7 +18,7 @@ labels: bug
 - [ ] Decode stops after ~4 frames
 - [ ] Picture frozen after seek/pause (audio continues)
 - [ ] HDR picture dim/flat
-- [ ] Flicker / artifacts on specific files
+- [ ] Flicker / artifacts on specific files (attach mediainfo/ffprobe of the file)
 - [ ] Other: 
 
 **Evidence**
