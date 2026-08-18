@@ -336,3 +336,24 @@ fonts should be CJK).
   package (`python3-fonttools`) for root-run automation.
 - HK/TC/SC/JP are all faces inside one TTC — pick the region face, don't
   settle for face 0 (JP).
+
+### 15. CEC watchdog bug — parse error meant it never fired (2026-08-18) — FIXED
+
+The `cec-watch.sh` timer appeared active but never kicked. Root cause: the
+physical-address parser used `awk '{print $3}'` on the cec-ctl line
+`Physical Address           : f.f.f.f` — field 3 is the colon, field 4 is the
+address. So the comparison `$PA = f.f.f.f` never matched and the script exited
+silently on every tick (and wrote nothing to journald, so there was no trace).
+
+Fixes in the new version:
+- `awk '{print $4}'` (+ regex fallback) — verified live: detected `f.f.f.f`,
+  kicked, recovered to `1.0.0.0` with music playing
+- **Relaxed the guard**: only defer when kodi is playing VIDEO. Audio-only
+  (music via USB DAC) is safe to kick — the re-detect only re-inits the HDMI
+  video plane, USB audio is untouched
+- Logs every tick to `/var/log/cec-watch.log` (was silent before — a
+  watchdog with no log is unverifiable)
+
+**Lesson**: field-index bugs in awk parsers are invisible when the program
+only acts on one specific value — always log what you parsed, and test both
+the "needs action" and "no action" branches.
