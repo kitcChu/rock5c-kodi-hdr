@@ -2,7 +2,8 @@
 
 This is the complete, ordered procedure as performed and verified on a real system.
 It assumes: Radxa ROCK 5C (any RAM), Radxa bookworm CLI image on SD/eMMC, network up,
-SSH as `radxa` (password `radxa`), NFS media at `/mnt/multimedia` (optional).
+SSH as the default board user (change the default password first!), NFS media at
+`/mnt/multimedia` (optional).
 
 ## 0. Conventions
 
