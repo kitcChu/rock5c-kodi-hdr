@@ -1,3 +1,6 @@
 *.o
 *.so
 *.deb
+.env
+.env.*
+!.env.example
