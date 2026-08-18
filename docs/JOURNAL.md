@@ -393,3 +393,44 @@ needed. Body: up to 3 targets (x/y int16 LE, speed int8) then distance/
 status bytes. The module was validated standalone on a Raspberry Pi 4B
 (kit@192.168.80.144, `/dev/ttyS0` @256000) before returning to the 5C —
 that proved module+wires were healthy and isolated the problem to the 5C.
+
+### 17. ⚠️ INCIDENT: presence agent paused movies — hard-rule violation (2026-08-18)
+
+**What happened**: while testing the live presence agent, movies began
+"freezing". Investigation showed it was NOT a resource problem — the agent
+was PAUSING playback because the RD-03D radar reported "room empty" while
+the family was actually watching (seated, still — the radar's detection
+coverage/placement did not see the couch).
+
+```
+11:49:25 POLICY: paused player 1 (room empty)
+11:49:46 POLICY: paused player 1 (room empty)
+11:50:06 POLICY: paused player 1 (room empty)
+11:50:44 POLICY: resumed player 1 (person returned)
+```
+
+**Violated rule**: "never disturb playback — son watches movies".
+
+**Response**: agent stopped + disabled immediately (systemctl stop/disable).
+Movie playback restored (speed=1).
+
+**Secondary findings from the investigation** (worth keeping):
+- PipeWire stack (pipewire/wireplumber/pipewire-pulse) was pegged ~220% CPU
+  stuck in `usb_port_resume` (C922 webcam mics autosuspend hang) → disabled
+  via `systemctl --user disable`; the user units live in /etc/systemd/user/
+  and pkill -9 alone triggers Restart=on-failure, so disable must go through
+  the user manager.
+- USB autosuspend (2s default) disabled: `usbcore.autosuspend=-1` in
+  /etc/kernel/cmdline + live `echo -1 > /sys/module/usbcore/parameters/autosuspend`.
+- Kodi's ActiveAE logged A/V sync errors up to 527ms after pause/resume —
+  correlated with the agent's pause/resume cycles, not with display issues.
+- CEC watchdog ruled out (never kicks during playback; guard works).
+- NFS read throughput 111 MB/s — not a bottleneck.
+
+**Design changes required before the agent returns** (NOT re-enabled):
+1. Radar detection must be calibrated so seated viewers are detected
+   (placement + sensitivity), with a verified "occupied couch" test.
+2. Pause policy must be far more conservative: debounce 60s+, only act on
+   long stable EMPTY, and default OFF (opt-in toggle).
+3. Consider: never auto-pause if a child is known-present; log every action
+   for auditability.
