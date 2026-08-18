@@ -19,6 +19,7 @@ labels: bug
 - [ ] Picture frozen after seek/pause (audio continues)
 - [ ] HDR picture dim/flat
 - [ ] Flicker / artifacts on specific files (attach mediainfo/ffprobe of the file)
+- [ ] Crash on movie open with `GL: Requested render method: 0` + `unsupported format 179` in the crashlog (check `videoplayer.useprimerenderer` is 0 — see JOURNAL §17)
 - [ ] Other: 
 
 **Evidence**

@@ -507,3 +507,61 @@ current movie plays via `hevc (rkmpp)` with 0 resets and CPU 26%.
   kodi's frame pool (videoplayer settings).
 - **kodi.log has NO rotation** — the morning evidence vanished on restart.
   Worth adding a copy-to-NAS-on-restart hook for future forensics.
+
+## 17. "Crash on clicking another movie" — root cause #7: `useprimerenderer` flipped 0→1 (2026-08-19) — FIXED
+
+**Symptom**: kodi SIGSEGV ~0.5s after opening any 4K HDR movie. Crashlog
+signature: `GL: Requested render method: 0` → `GetShaderFormat - unsupported
+format 179` (P010 10-bit) → `gl_tonemap.glsl failed to open` → SEGV.
+Reproduced 5× in one night, deterministic.
+
+**Root cause**: the `useprimerenderer` guisetting flipped from **0 (DIRECT)
+to 1**. Source proof — the first line of `CRendererDRMPRIME::Create()`:
+```cpp
+if (buffer && GetSettings()->GetInt(SETTING_VIDEOPLAYER_USEPRIMERENDERER) == 0)
+```
+With value 1, `Create()` returns nullptr immediately → the factory falls
+through to LinuxRendererGL → GL cannot handle P010 → SEGV. Backups that
+bracket the working sessions prove the value was 0 before. The decoder still
+opened (`hevc (rkmpp)` appears in the crash logs) — only the renderer's
+self-qualification failed.
+
+**Fix**: stop kodi, set the setting back to 0, start. Verified: 4K HDR plays
+(`hevc (rkmpp)` + NV15 on the video plane, bt2020/smpte2084, CPU 6.7%), and
+switching directly to a second 4K file also survives.
+
+**Amplifier**: with the TV off at kodi boot, EGL core-context creation fails
+(→ compat GL 3.1 → GLSL 1.40 → shader path `GL/1.2/`, where no video shaders
+exist — they live in `GL/1.5/`). So the GL fallback isn't just slow, it SEGVs
+on the first 10-bit frame. This explains "failed to open gl_tonemap.glsl"
+even though the file exists.
+
+**False trails (documented so nobody repeats them):**
+1. Renderer-factory clear race: real in theory, not this bug — exactly one
+   `FindPlanes`/`EGL_VERSION` per session in the crash logs (no re-init ran).
+2. eglGetProcAddress hook: useless — kodi resolves EGL entry points once.
+3. **Runtime binary patching of kodi.bin (call-site trampolines): corrupted
+   kodi and wedged the board. Hard rule: no runtime binary patching.** The
+   known-good shim backup restored in one minute.
+4. Register() guard analysis: all three guard-exit paths disassembled and
+   mapped — a red herring; guards pass.
+
+**Diagnostic that cracked it**: diffing `guisettings.xml` against the NAS
+backups.
+
+**Permanent improvements (shim v22, deployed + this repo):**
+- Registration retry thread: +20s after first `eglInitialize`, then
+  `CRendererDRMPRIME::Register()` every 5s (idempotent, internally locked,
+  self-guarding). The GUI stops swapping after ~3 frames once the screensaver
+  blanks, so swap-hook registration alone is fragile.
+- Renderer registration at every `eglInitialize` (covers display re-inits).
+- Hook logging for future diagnosis.
+
+**Housekeeping**: `libavcodec-extra59` had silently lost its apt hold again —
+re-held. Backup script now includes the compiled shim; fresh backup captured
+the working state.
+
+**Open**: what flipped the setting is unknown (candidates: a GUI toggle —
+our Register() makes the setting visible in Settings, where stock GL kodi
+keeps it hidden — or a crash-time settings save). Check
+`videoplayer.useprimerenderer` is 0 if this signature returns.

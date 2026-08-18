@@ -15,6 +15,7 @@
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,25 +129,59 @@ static void register_drmprime_renderer(void)
     if (!base)
         return;
     reg_fn r = (reg_fn)(base + OFF_RENDERER_DRMPRIME_REGISTER);
+    static unsigned counter;
+    if (counter < 3 || (counter % 1000) == 0)
+        fprintf(stderr, "kodi-shim: renderer Register() call #%u\n", counter);
+    counter++;
     r(); /* CRendererDRMPRIME::Register() - idempotent; re-adds to factory */
 }
 
 typedef int (*eglinit_fn)(void *, int *, int *);
+
+/*
+ * Late-registration thread: on this GBM setup the GUI stops swapping after a
+ * few frames once the screensaver blanks the display (or when the EGL
+ * context is degraded), so swap-hook registration is not enough — the
+ * factory may never receive "drm_prime" before a movie is opened.
+ * Register() is idempotent, internally locked (CRendererFactory uses a
+ * CCriticalSection) and self-guards on the video plane, so a slow retry
+ * loop is safe. Start at +20s: by then kodi's service broker (settings,
+ * window system) is fully up; before that the guards/settings may be null.
+ */
+static void *register_retry_thread(void *arg)
+{
+    (void)arg;
+    sleep(20);
+    for (;;) {
+        register_drmprime_renderer();
+        sleep(5);
+    }
+    return NULL;
+}
+
+static void start_register_retry_thread(void)
+{
+    static int started;
+    if (started)
+        return;
+    started = 1;
+    pthread_t t;
+    pthread_create(&t, NULL, register_retry_thread, NULL);
+}
 
 typedef int (*eglswap_fn)(void *, void *);
 
 int eglSwapBuffers(void *dpy, void *draw)
 {
     static eglswap_fn real_fn;
+    static int logged;
     if (!real_fn)
         real_fn = (eglswap_fn)dlsym(RTLD_NEXT, "eglSwapBuffers");
+    if (!logged) {
+        logged = 1;
+        fprintf(stderr, "kodi-shim: eglSwapBuffers hook fired\n");
+    }
     int res = real_fn(dpy, draw);
-    /*
-     * CWinSystemGbm*Context::InitWindowSystem() calls
-     * CRendererFactory::ClearRenderer() on every (re)init, e.g. on the
-     * display mode change when playback starts. RegisterRenderer is an
-     * idempotent map insert, so simply re-register on every swap.
-     */
     register_drmprime_renderer();
     return res;
 }
@@ -155,12 +190,23 @@ int eglInitialize(void *dpy, int *major, int *minor)
 {
     static eglinit_fn real_fn;
     static int done;
+    static unsigned count;
     if (!real_fn)
         real_fn = (eglinit_fn)dlsym(RTLD_NEXT, "eglInitialize");
     int res = real_fn(dpy, major, minor);
-    if (res && !done) {
-        done = 1;
-        register_drmprime_codecs();
+    if (res) {
+        count++;
+        fprintf(stderr, "kodi-shim: eglInitialize #%u (decoder %s)\n",
+                count, done ? "done" : "first");
+        if (!done) {
+            done = 1;
+            register_drmprime_codecs();
+            start_register_retry_thread();
+        }
+        /* display re-init path: ClearRenderer() may have wiped the factory
+         * after the first GUI swaps; re-add the renderer on every egl init.
+         * Register() is idempotent and self-guards on the video plane. */
+        register_drmprime_renderer();
     }
     return res;
 }
