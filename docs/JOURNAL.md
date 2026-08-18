@@ -458,3 +458,52 @@ radar). Playback is protected.
 (kit@192.168.80.144, /dev/ttyS0 @256000) — identical result: streams
 225 frames, zero detections at point-blank range. Both boards agree ⇒ the
 module's RF front-end is faulty, not the 5C. Replacement required.
+
+### 16. Decode error storm on 4K HDR + silent ffmpeg-lib replacement (2026-08-18) — INVESTIGATED + FIXED
+
+**Symptom**: 4K HDR movie (Guardians Vol 2, 2160p x265) broke — 2000+ kernel
+`mpp_rkvdec2 ... resetting for err 0x23/0x107`, kodi JSON-RPC wedged, video
+frozen. kodi CPU stayed ~28% (hardware path engaged but failing).
+
+**Phase 1 evidence gathered:**
+- CMA `CmaFree` hit **0 kB** during the storm (512M pool)
+- Single clean 4K decode dips CMA to ~1.6MB free but recovers (512M is
+  marginal-but-sufficient for ONE session)
+- ffmpeg (non-kodi) releases CMA fine across repeated opens (delta ~0)
+- The storm correlated with **5 rapid decode sessions in 5 min** (14:14–14:18)
+  — each session allocates a fresh frame pool (~221MB: 17×13MB) before the
+  old one is freed → 5 sessions ≈ 1.1GB demand on a 512MB pool → exhausted
+- **Two separate root causes found:**
+  - **A. Session-stack CMA exhaustion**: rapid re-opens (seeks/restarts) pile
+    frame pools faster than they're released → pool hits 0 → decoder resets
+    continuously until a restart frees everything
+  - **B. Stock-lib replacement (the big one)**: apt history showed
+    `apt-get install libavcodec-dev libavformat-dev libavutil-dev pkg-config`
+    at 21:29 **removed our patched `libavcodec59`** and swapped in the stock
+    `libavcodec-extra59` (no rkmpp) — the exact quirk from §6. Holds had
+    vanished again. kodi restarted at 22:27 would have been software-decoding.
+
+**The fix that mattered most (B)**: restore patched lib from the NAS backup:
+```bash
+LATEST=$(ls -t /mnt/backups/rock5c-core-*.tar.gz | head -1)
+cd /tmp && rm -rf rtest && mkdir rtest
+tar xzf "$LATEST" -C rtest home/radxa/ffmpeg-src/libavcodec-extra59_5.1.9-0+deb12u1_arm64.deb
+sudo dpkg -i rtest/home/radxa/ffmpeg-src/libavcodec-extra59_5.1.9-0+deb12u1_arm64.deb
+sudo apt-mark hold ffmpeg libavcodec59 libavcodec-extra59 libavdevice59 \
+  libavfilter8 libavformat59 libavutil57 libpostproc56 libswresample4 libswscale6
+```
+Verified: installed lib has rkmpp again, `hevc_rkmpp` back in `ffmpeg -decoders`,
+current movie plays via `hevc (rkmpp)` with 0 resets and CPU 26%.
+
+**Lessons:**
+- **The NAS backup is the recovery path** — it contains the patched debs
+  (verified: rkmpp strings present, 12.7MB vs stock 12.6MB). Restore is a
+  tar-extract + dpkg -i + hold, ~1 minute.
+- **Holds vanish silently** — this is the THIRD time. Verify `apt-mark
+  showhold` includes libavcodec* after ANY apt operation, and NEVER install
+  `libavcodec-dev` (it pulls stock libs). Journal §6 said this; it recurred.
+- **CMA 512M is marginal for 4K HDR**: one session fine, stacked sessions die.
+  If rapid-seek scenarios recur, consider `cma=768M` (cost: RAM) or reducing
+  kodi's frame pool (videoplayer settings).
+- **kodi.log has NO rotation** — the morning evidence vanished on restart.
+  Worth adding a copy-to-NAS-on-restart hook for future forensics.
