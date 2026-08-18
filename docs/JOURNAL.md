@@ -296,3 +296,43 @@ re-syncs → phys addr becomes `1.0.0.0`, logical address claimed, remote works.
   (no udev uevent fires on this platform, so polling beats udev rules).
 - Always guard display-affecting kicks with a playback check; defer is fine
   (timer retries every 30s).
+
+### 14. CJK still rendered as boxes — the "CJK fix" never actually fixed the GUI (2026-08-18) — FIXED
+
+**Symptom**: all CJK characters (movie titles, subtitles, menus) render as
+hollow rectangles. Earlier session replaced `/usr/share/kodi/media/Fonts/arial.ttf`
+with Noto Sans CJK — but the GUI never used it.
+
+**Root cause** (verified): Kodi's Estuary skin has two fontsets in
+`skin.estuary/xml/Font.xml`:
+- `Default` fontset → loads `NotoSans-Regular.ttf`, `NotoSans-Bold.ttf`,
+  `Roboto-Thin.ttf` from `skin.estuary/fonts/` — all **Latin-only** system fonts
+  (symlinked). The GUI uses this fontset (`lookandfeel.font = Default`).
+- `Arial` fontset → loads `arial.ttf` — which is the file we'd replaced. Never selected.
+
+So the GUI loaded Latin-only glyphs → CJK → boxes, regardless of arial.ttf.
+
+**Verification path that mattered**: `fc-scan` on the actual files kodi loads
+(skin fonts dir), not the media/Fonts dir. The first `cp` also wrote through
+symlinks and accidentally overwrote the system font — restored from
+`fonts-noto-core` deb (keeping the system font Latin is correct; only the skin
+fonts should be CJK).
+
+**The fix** — `scripts/apply-cjk-fonts.sh` (idempotent, re-run after kodi upgrades):
+1. Extract the **HK face** (index 4) from the system `NotoSansCJK-Regular/Bold.ttc`
+   (fontTools; correct variant for Hong Kong users)
+2. Replace the skin's `NotoSans-Regular.ttf` / `NotoSans-Bold.ttf` /
+   `Roboto-Thin.ttf` symlinks with **real files** of the HK font
+3. Originals backed up as `*.latin-orig` (symlinks to system fonts)
+4. Restart kodi
+
+**Lessons**:
+- "CJK font fix" must target what the skin's *Default fontset actually loads*,
+  not a sibling file — check `Font.xml` fontset filenames first.
+- `cp file symlink` writes **through** the symlink to its target — always
+  `rm` the symlink first or use `cp -P` semantics. This one silently modified
+  a system font.
+- `pip install` as user doesn't persist for `sudo` scripts — use the apt
+  package (`python3-fonttools`) for root-run automation.
+- HK/TC/SC/JP are all faces inside one TTC — pick the region face, don't
+  settle for face 0 (JP).
