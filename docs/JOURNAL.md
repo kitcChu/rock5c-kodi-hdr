@@ -565,3 +565,35 @@ the working state.
 our Register() makes the setting visible in Settings, where stock GL kodi
 keeps it hidden — or a crash-time settings save). Check
 `videoplayer.useprimerenderer` is 0 if this signature returns.
+
+## 18. HDR10 metadata audit — blob primaries scrambled + EOTF sent as HLG (2026-08-19) — FIXED
+
+**Question**: is kodi actually sending 10-bit HDR metadata to the TV?
+
+**Method**: dump the DRM connector's `HDR_OUTPUT_METADATA` blob during
+playback (`scripts/hdr-audit.c`) — it shows exactly what goes on the HDMI
+wire. Plane state in `/sys/kernel/debug/dri/0/state` shows the pixel path.
+
+**Audit findings** (before fixes):
+- Pixels ✓: `plane[72] NV15` (10-bit), `BT.2020 YCbCr` limited.
+- Metadata blob present ✓, luminance ✓ (1000/0.005 nits, D65).
+- **Bug 1**: kodi 20.1 copies ffmpeg's r,g,b primary order into the CTA-861
+  infoframe slots, which are g,b,r — the TV received a scrambled gamut
+  triangle (G slot = red, R slot = blue).
+- **Bug 2**: EOTF signalled as HLG (2) instead of PQ (1) — MPP reports
+  generic BT2020_10 for HDR10 streams (no VUI transfer parse); kodi maps it
+  to HLG.
+- MaxCLL/MaxFALL = 0 is faithful — the encode itself carries zeros (checked
+  with ffprobe side-data + byte-level parse of the prefix-SEI NAL).
+
+**Fixes (shim v24)**, one hook — `drmModeCreatePropertyBlob` interposition:
+1. Rotate primaries r,g,b → g,b,r in any 32-byte TYPE1 HDR blob.
+2. Rewrite eotf 2 → 1 when mastering luminance is present (HLG never carries
+   ST.2086 metadata, so a luminance-bearing HLG blob is a mislabeled PQ one).
+
+**Verified on the wire**: eotf=1 (PQ), G(13250,34500) B(7500,3000)
+R(34000,16000), D65, max 1000 nits.
+
+**Proper fix staged**: `rkmppdec.c` color_trc fallback (container hint, else
+SMPTE2084 when ST.2086 present) is patched in the tree — but ffmpeg builds
+are on hold: the board hard-wedged twice at build ramp-up (see §19).

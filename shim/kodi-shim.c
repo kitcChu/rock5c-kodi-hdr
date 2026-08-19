@@ -136,6 +136,56 @@ static void register_drmprime_renderer(void)
     r(); /* CRendererDRMPRIME::Register() - idempotent; re-adds to factory */
 }
 
+/*
+ * kodi 20.1 bug compensation: CWinSystemGbm copies ffmpeg's r,g,b
+ * AVMasteringDisplayMetadata.display_primaries order straight into the
+ * HDMI HDR static-metadata infoframe, whose slots are ordered g,b,r
+ * (CTA-861-G). The Sony then receives a scrambled gamut triangle
+ * (observed live: slot "G"=0.68/0.32 = red, slot "R"=0.15/0.06 = blue).
+ * kodi.bin imports drmModeCreatePropertyBlob, so we interpose it and
+ * rotate the primaries of any 32-byte hdr_output_metadata blob:
+ * emitted [r,g,b] -> wire [g,b,r]. Deterministic for this build; if
+ * kodi is ever upgraded past this bug, re-verify before keeping the
+ * rotation (the shim is build-ID-locked anyway).
+ */
+typedef int (*createblob_fn)(int, const void *, size_t, uint32_t *);
+
+int drmModeCreatePropertyBlob(int fd, const void *data, size_t size, uint32_t *id)
+{
+    static createblob_fn real_fn;
+    if (!real_fn)
+        real_fn = (createblob_fn)dlsym(RTLD_NEXT, "drmModeCreatePropertyBlob");
+    unsigned char buf[32];
+    if (size == 32 && data && ((const uint32_t *)data)[0] == 0) {
+        /* struct hdr_output_metadata, metadata_type HDMI_STATIC_METADATA_TYPE1:
+         * offset 4 eotf, 5 metadata_type, 6..17 primaries (3 x u16 x,y),
+         * 18..21 white point, 22..23 max(cd/m2), 24..25 min(0.0001), cll, fall */
+        uint16_t *pr = (uint16_t *)((char *)data + 6);
+        if (pr[0] | pr[1] | pr[2] | pr[3] | pr[4] | pr[5]) {
+            memcpy(buf, data, 32);
+            uint16_t *b = (uint16_t *)(buf + 6);
+            uint16_t t0 = b[0], t1 = b[1]; /* emitted slot0 = red */
+            b[0] = b[2]; b[1] = b[3];      /* slot0 <- green */
+            b[2] = b[4]; b[3] = b[5];      /* slot1 <- blue  */
+            b[4] = t0;   b[5] = t1;        /* slot2 <- red   */
+            /* EOTF fix: MPP reports generic BT2020_10 for the VUI transfer
+             * of HDR10 streams; kodi maps that to eotf=2 (HLG). A blob that
+             * carries ST.2086 mastering luminance is HDR10 (PQ) content by
+             * definition — HLG streams do not carry mastering metadata —
+             * so rewrite eotf 2 -> 1 (SMPTE ST.2084). */
+            unsigned char *eotf = buf + 4;
+            uint16_t max_lum = b[8]; /* offset 6+12: max_display_mastering_luminance */
+            if (*eotf == 2 && max_lum > 0) {
+                *eotf = 1;
+                fprintf(stderr, "kodi-shim: HDR blob eotf HLG -> PQ (ST.2084)\n");
+            }
+            data = buf;
+            fprintf(stderr, "kodi-shim: HDR blob primaries rotated r,g,b -> g,b,r\n");
+        }
+    }
+    return real_fn(fd, data, size, id);
+}
+
 typedef int (*eglinit_fn)(void *, int *, int *);
 
 /*
