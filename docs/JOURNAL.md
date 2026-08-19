@@ -597,3 +597,13 @@ R(34000,16000), D65, max 1000 nits.
 **Proper fix staged**: `rkmppdec.c` color_trc fallback (container hint, else
 SMPTE2084 when ST.2086 present) is patched in the tree — but ffmpeg builds
 are on hold: the board hard-wedged twice at build ramp-up (see §19).
+
+## 19. Board hard-wedges under sustained build load — OPEN
+
+Three instant-total hangs (no ping/SSH, power-cycle needed): gdb attach on
+kodi, and two `dpkg-buildpackage -j6` launches (second one clean: systemd-run,
+kodi stopped, swap mounted — still wedged ~3 min in). Idles and plays fine,
+temps cool. Suspects: PSU droop under load spike, RAM instability under
+sustained bandwidth. No ffmpeg builds on this board until diagnosed; check
+`/sys/fs/pstore` after the next wedge. The `rkmppdec.c` EOTF patch is staged
+in the tree; the shim covers the symptom meanwhile.
