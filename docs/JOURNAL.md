@@ -607,3 +607,22 @@ temps cool. Suspects: PSU droop under load spike, RAM instability under
 sustained bandwidth. No ffmpeg builds on this board until diagnosed; check
 `/sys/fs/pstore` after the next wedge. The `rkmppdec.c` EOTF patch is staged
 in the tree; the shim covers the symptom meanwhile.
+
+## 22. AV1 hardware decoding shipped (2026-08-20) — DONE
+
+`av1_rkmpp` is live on the board: kodi plays AV1 through the RK3588 VDPU
+(`using decoder av1 (rkmpp)` in kodi.log). Chain: capability probe →
+scripts/patch_rkmpp_av1.sh → CI cloud build (Debian bookworm arm64 runner,
+~8 min) → libavcodec-extra59 deb → dpkg -i → verified playback.
+
+Operational notes:
+- Builds happen ONLY in CI now (board wedge rule §19). Workflow:
+  .github/workflows/build-ffmpeg-rkmpp.yml; debs attached to release tag
+  `ffmpeg-5.1.9-rkmpp-base` (public CDN; Actions artifact CDN can be ~25KB/s).
+- librockchip-mpp-dev is absent from debian/control (Radxa image
+  pre-installs it) — CI adds radxa-repo.github.io/rk3588s2-bookworm with the
+  keyring from assets/ci-radxa-archive-keyring.gpg.
+- dpkg -i reinstalls clear apt holds (caught again, re-applied — ALWAYS
+  verify `apt-mark showhold` after dpkg/apt ops).
+- Stage 2 (pending): AV1 HDR10 mastering export via
+  mpp_frame_get_mastering_display (API confirmed present in MPP 1.5).
