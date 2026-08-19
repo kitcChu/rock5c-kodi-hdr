@@ -46,7 +46,8 @@ jobs:
       - name: Install build dependencies (from debian/control)
         run: |
           cd ffmpeg-5.1.9
-          mk-build-deps debian/control -t 'apt-get -y -qq --no-install-recommends'
+          mk-build-deps -i debian/control -t 'apt-get -y -qq --no-install-recommends' || \
+            (dpkg -i *.deb || true; apt-get -f install -y -qq)
 
       - name: Build debs (as non-root)
         run: |
