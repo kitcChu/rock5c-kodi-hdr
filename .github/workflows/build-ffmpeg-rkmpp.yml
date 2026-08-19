@@ -1,0 +1,69 @@
+# Cloud build for the patched ffmpeg (rkmpp + AV1) — NEVER build on the board
+# (it hard-wedges under -j6 build load; see docs/JOURNAL.md §19).
+#
+# Downloads the known-good base tree from the release, applies the AV1
+# decoder registration patch, builds Debian bookworm debs on a free
+# arm64 runner (public repo). Resulting debs install on the Rock 5C as-is.
+#
+# Manual trigger only: Actions tab -> build-ffmpeg-rkmpp -> Run workflow.
+name: build-ffmpeg-rkmpp
+
+on:
+  workflow_dispatch:
+    inputs:
+      parallel:
+        description: "make -j level"
+        default: "4"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Install toolchain
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            git curl ca-certificates python3 build-essential \
+            devscripts equivs fakeroot
+
+      - uses: actions/checkout@v4
+
+      - name: Fetch base tree (release asset)
+        run: |
+          curl -fL --retry 3 -o base.tar.gz \
+            "https://github.com/${{ github.repository }}/releases/download/ffmpeg-5.1.9-rkmpp-base/ffmpeg-5.1.9-rkmpp-base.tar.gz"
+          tar xzf base.tar.gz
+
+      - name: Apply AV1 patch
+        run: scripts/patch_rkmpp_av1.sh ffmpeg-5.1.9
+
+      - name: Install build dependencies (from debian/control)
+        run: |
+          cd ffmpeg-5.1.9
+          mk-build-deps debian/control -t 'apt-get -y -qq --no-install-recommends'
+
+      - name: Build debs (as non-root)
+        run: |
+          useradd -m builder
+          chown -R builder: .
+          su builder -c 'cd ffmpeg-5.1.9 && \
+            DEB_BUILD_OPTIONS="nocheck parallel=${{ github.event.inputs.parallel || '4' }}" \
+            dpkg-buildpackage -b -uc -us -j${{ github.event.inputs.parallel || '4' }}'
+
+      - name: Collect debs
+        run: |
+          mkdir -p debs
+          mv ../*.deb debs/
+          ls -la debs/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-rkmpp-av1-debs
+          path: debs/*.deb
+          retention-days: 90
