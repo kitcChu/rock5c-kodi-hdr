@@ -69,9 +69,11 @@ jobs:
             dpkg-buildpackage -b -uc -us -j${{ github.event.inputs.parallel || '4' }}'
 
       - name: Collect debs
+        # dpkg-buildpackage inside ffmpeg-5.1.9/ emits debs to its parent,
+        # which IS the workspace root here (not ..)
         run: |
           mkdir -p debs
-          mv ../*.deb debs/
+          for f in ./*.deb ../*.deb; do [ -e "$f" ] && mv "$f" debs/; done
           ls -la debs/
 
       - uses: actions/upload-artifact@v4
