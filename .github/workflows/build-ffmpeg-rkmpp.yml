@@ -30,7 +30,7 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends \
             git curl ca-certificates python3 build-essential \
-            devscripts equivs fakeroot
+            devscripts equivs fakeroot pkg-config
 
       - uses: actions/checkout@v4
 
