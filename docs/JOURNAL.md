@@ -592,7 +592,7 @@ wire. Plane state in `/sys/kernel/debug/dri/0/state` shows the pixel path.
    ST.2086 metadata, so a luminance-bearing HLG blob is a mislabeled PQ one).
 
 **Verified on the wire**: eotf=1 (PQ), G(13250,34500) B(7500,3000)
-R(34000,16000), D65, max 1000 nits.
+R(34000,16000), D65, max 1000 nits. Visually confirmed by the user the same evening ("color perfect").
 
 **Proper fix staged**: `rkmppdec.c` color_trc fallback (container hint, else
 SMPTE2084 when ST.2086 present) is patched in the tree — but ffmpeg builds
