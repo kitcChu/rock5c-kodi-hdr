@@ -16,7 +16,7 @@ on:
         default: "4"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -81,3 +81,22 @@ jobs:
           name: ffmpeg-rkmpp-av1-debs
           path: debs/*.deb
           retention-days: 90
+
+      # Artifact CDN can be slow from some networks; also publish the two
+      # debs that matter as release assets (public, fast, unauthenticated).
+      - name: Attach key debs to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REL=$(curl -fsSL -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/ffmpeg-5.1.9-rkmpp-base" \
+            | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
+          echo "release id: $REL"
+          for f in debs/libavcodec59_*_arm64.deb debs/libavcodec-extra59_*_arm64.deb; do
+            curl -fsSL -X POST \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Content-Type: application/vnd.debian.binary-package" \
+              --data-binary @"$f" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=$(basename $f)" \
+              | grep -o '"browser_download_url": *"[^"]*"'
+          done
