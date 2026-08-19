@@ -44,19 +44,15 @@ jobs:
         run: scripts/patch_rkmpp_av1.sh ffmpeg-5.1.9
 
       - name: Add Radxa apt repo (for librockchip-mpp-dev)
+        # NOTE: librockchip-mpp-dev is NOT in debian/control Build-Depends — the
+        # Radxa image pre-installs it on the board, so a fresh build host must
+        # add it explicitly (rockchip_mpp.pc comes from this package).
         run: |
-          for k in radxa-archive-keyring.gpg apt-radxa.gpg; do
-            curl -fsSL -o /usr/share/keyrings/radxa.gpg "https://radxa-repo.github.io/$k" && break
-          done
-          if [ -s /usr/share/keyrings/radxa.gpg ]; then
-            OPT='signed-by=/usr/share/keyrings/radxa.gpg'
-          else
-            echo 'WARN: key fetch failed, using trusted=yes'; OPT='trusted=yes'
-          fi
-          echo "deb [arch=arm64 $OPT] https://radxa-repo.github.io/bookworm bookworm main" > /etc/apt/sources.list.d/radxa.list
-          echo "deb [arch=arm64 $OPT] https://radxa-repo.github.io/rk3588s2-bookworm rk3588s2-bookworm main" >> /etc/apt/sources.list.d/radxa.list
+          cp assets/ci-radxa-archive-keyring.gpg /usr/share/keyrings/radxa-archive-keyring.gpg
+          echo "deb [arch=arm64 signed-by=/usr/share/keyrings/radxa-archive-keyring.gpg] https://radxa-repo.github.io/rk3588s2-bookworm rk3588s2-bookworm main" > /etc/apt/sources.list.d/radxa.list
           apt-get update -qq
-          apt-cache policy librockchip-mpp-dev | head -3
+          apt-get install -y -qq --no-install-recommends librockchip-mpp-dev
+          pkg-config --modversion rockchip_mpp
 
       - name: Install build dependencies (from debian/control)
         run: |
