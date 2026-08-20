@@ -230,50 +230,58 @@ int drmModeCreatePropertyBlob(int fd, const void *data, size_t size, uint32_t *i
 /* ------------------------------------------------------------------ */
 /*
  * kodi 20.1 GBM never sets plane zpos (verified: no zpos code in the
- * 20.1 DRM layer). The VOP2 driver sorts active planes by zpos and maps
+ * 20.1 DRM layer). The VOP2 driver sorts active planes by raw zpos and maps
  * them to hardware layers in that order (source-verified:
  * sort(vop2_zpos, ..., vop2_zpos_cmp) -> layer order = zpos order).
- * Defaults: primary Cluster0 (GUI) zpos 0 BELOW overlay Esmart0 (video)
- * zpos 1 -> OSD/menus render beneath the movie. Setting zpos from outside
- * fails: kodi holds DRM master, external writes get EACCES.
- * Fix: interpose kodi's own drmModeAtomicCommit (kodi.bin imports it) and,
- * once, fire a standalone one-property atomic commit raising the GUI plane
- * to zpos 8 (a zpos change on an active plane needs ALLOW_MODESET). Kodi
- * is master, so its own commit succeeds. Only GUI(56) and video(72) are
- * active during playback, so 8 sorts cleanly above video's 1.
+ * Raw defaults: GUI (Cluster0, id 56) = 0, video (Esmart0, id 72) = 11 —
+ * so the video stacks above the GUI and OSD/menus render beneath the movie.
+ * Setting zpos from outside fails: kodi holds DRM master, external writes
+ * get EACCES. Fix: interpose kodi's own drmModeAtomicCommit (kodi.bin
+ * imports it) and, once, fire a standalone atomic commit setting video(72)
+ * zpos=0 and GUI(56) zpos=8. Only these two planes are active during
+ * playback, so 0 < 8 puts the GUI cleanly on top. Kodi is master, so its
+ * own commit succeeds; a zpos change on active planes needs ALLOW_MODESET.
  */
 typedef int (*atomic_commit_fn)(int, drmModeAtomicReqPtr, uint32_t, void *);
+
+static uint32_t plane_zpos_prop(int fd, uint32_t plane_id)
+{
+    drmModeObjectPropertiesPtr props =
+        drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE);
+    uint32_t prop = 0;
+    if (props) {
+        for (uint32_t i = 0; i < props->count_props; i++) {
+            drmModePropertyPtr p = drmModeGetProperty(fd, props->props[i]);
+            if (p && !strcmp(p->name, "zpos"))
+                prop = p->prop_id;
+            if (p)
+                drmModeFreeProperty(p);
+        }
+        drmModeFreeObjectProperties(props);
+    }
+    return prop;
+}
 
 int drmModeAtomicCommit(int fd, drmModeAtomicReqPtr req, uint32_t flags, void *user_data)
 {
     static atomic_commit_fn real_fn;
-    static uint32_t zpos_prop;
+    static uint32_t gui_zpos, vid_zpos;
     static int zpos_raised;
     if (!real_fn)
         real_fn = (atomic_commit_fn)dlsym(RTLD_NEXT, "drmModeAtomicCommit");
-    if (!zpos_prop) {
-        drmModeObjectPropertiesPtr props =
-            drmModeObjectGetProperties(fd, 56, DRM_MODE_OBJECT_PLANE);
-        if (props) {
-            for (uint32_t i = 0; i < props->count_props; i++) {
-                drmModePropertyPtr p = drmModeGetProperty(fd, props->props[i]);
-                if (p && !strcmp(p->name, "zpos"))
-                    zpos_prop = p->prop_id;
-                if (p)
-                    drmModeFreeProperty(p);
-            }
-            drmModeFreeObjectProperties(props);
-            if (zpos_prop)
-                fprintf(stderr, "kodi-shim: zpos prop %u on GUI plane 56\n", zpos_prop);
-        }
+    if (!gui_zpos) {
+        gui_zpos = plane_zpos_prop(fd, 56);
+        vid_zpos = plane_zpos_prop(fd, 72);
+        fprintf(stderr, "kodi-shim: zpos props gui(56)=%u vid(72)=%u\n", gui_zpos, vid_zpos);
     }
-    if (zpos_prop && !zpos_raised && !(flags & DRM_MODE_ATOMIC_TEST_ONLY)) {
+    if (gui_zpos && vid_zpos && !zpos_raised && !(flags & DRM_MODE_ATOMIC_TEST_ONLY)) {
         zpos_raised = 1;
         drmModeAtomicReqPtr zr = drmModeAtomicAlloc();
         if (zr) {
-            drmModeAtomicAddProperty(zr, 56, zpos_prop, 8);
+            drmModeAtomicAddProperty(zr, 72, vid_zpos, 0); /* video to bottom */
+            drmModeAtomicAddProperty(zr, 56, gui_zpos, 8);  /* GUI on top */
             int rc = real_fn(fd, zr, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
-            fprintf(stderr, "kodi-shim: raised GUI plane 56 zpos -> 8 (rc=%d)\n", rc);
+            fprintf(stderr, "kodi-shim: set video zpos=0 + GUI zpos=8 (rc=%d)\n", rc);
             drmModeAtomicFree(zr);
         }
     }
