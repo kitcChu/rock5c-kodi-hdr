@@ -1,0 +1,4 @@
+# Re-sync CEC when the TV powers on (HDMI hotplug). The script no-ops
+# unless CEC phys addr is f.f.f.f, so a healthy link is never disturbed.
+# The 2s sleep lets EDID settle before the physical-address check.
+ACTION=="change", SUBSYSTEM=="drm", KERNEL=="card0", ENV{HOTPLUG}=="1", RUN+="/bin/sh -c 'sleep 2; /usr/local/bin/cec-resync.sh'"

@@ -655,3 +655,17 @@ risky DRM re-detect on this kernel — not worth keeping for the convenience
 of auto-healing CEC after a TV-off boot. CEC recovery is now manual: restart
 kodi, or `echo detect > /sys/class/drm/card0-HDMI-A-1/status` once when the
 TV is on. Units + script removed from board and repo.
+
+## 26. CEC re-sync: manual + udev-hotplug wiring (2026-08-20)
+
+Replaced the retired periodic watchdog with two non-intrusive triggers for
+the same one-shot heal (`cec-resync.sh`, guarded: only kicks when phys addr
+is f.f.f.f, and only when the TV answers "on" unless `--force`):
+1. **udev rule** (`99-cec-resync.rules`): runs on DRM HOTPLUG change events
+   — fires exactly when the TV powers on (the moment CEC should register).
+   No periodic polling, no TV-waking.
+2. **sudoers NOPASSWD** for radxa -> cec-resync.sh, so it can be triggered
+   via JSON-RPC `System.Exec("sudo /usr/local/bin/cec-resync.sh")` from a
+   phone (Kore/Yatse) when the remote/CEC is already dead.
+
+Manual CLI: `sudo cec-resync.sh [--force]`.
