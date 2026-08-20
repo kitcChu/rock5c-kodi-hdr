@@ -230,22 +230,25 @@ int drmModeCreatePropertyBlob(int fd, const void *data, size_t size, uint32_t *i
 /* ------------------------------------------------------------------ */
 /*
  * kodi 20.1 GBM never sets plane zpos (verified: no zpos code in the
- * 20.1 DRM layer). The VOP2 driver default order stacks the Esmart
- * video plane (zpos=1) ABOVE the Cluster0 GUI plane (zpos=0), so every
- * OSD/menu renders beneath the movie during playback. Setting zpos from
- * outside fails: kodi holds DRM master, external writes get EACCES.
- * Fix: interpose kodi's own drmModeAtomicCommit (kodi.bin imports it) and
- * append a zpos property for the GUI plane to each commit. Kodi is master,
- * so its own commit succeeds. Idempotent value, harmless on test commits.
- * GUI plane 56 (Cluster0-win0) and video plane 72 (Esmart0-win0) ids are
- * deterministic for this kernel/board; shim is build-ID-locked anyway.
+ * 20.1 DRM layer). The VOP2 driver sorts active planes by zpos and maps
+ * them to hardware layers in that order (source-verified:
+ * sort(vop2_zpos, ..., vop2_zpos_cmp) -> layer order = zpos order).
+ * Defaults: primary Cluster0 (GUI) zpos 0 BELOW overlay Esmart0 (video)
+ * zpos 1 -> OSD/menus render beneath the movie. Setting zpos from outside
+ * fails: kodi holds DRM master, external writes get EACCES.
+ * Fix: interpose kodi's own drmModeAtomicCommit (kodi.bin imports it) and,
+ * once, fire a standalone one-property atomic commit raising the GUI plane
+ * to zpos 8 (a zpos change on an active plane needs ALLOW_MODESET). Kodi
+ * is master, so its own commit succeeds. Only GUI(56) and video(72) are
+ * active during playback, so 8 sorts cleanly above video's 1.
  */
 typedef int (*atomic_commit_fn)(int, drmModeAtomicReqPtr, uint32_t, void *);
 
 int drmModeAtomicCommit(int fd, drmModeAtomicReqPtr req, uint32_t flags, void *user_data)
 {
     static atomic_commit_fn real_fn;
-    static uint32_t zpos_prop; /* informational */
+    static uint32_t zpos_prop;
+    static int zpos_raised;
     if (!real_fn)
         real_fn = (atomic_commit_fn)dlsym(RTLD_NEXT, "drmModeAtomicCommit");
     if (!zpos_prop) {
@@ -264,8 +267,16 @@ int drmModeAtomicCommit(int fd, drmModeAtomicReqPtr req, uint32_t flags, void *u
                 fprintf(stderr, "kodi-shim: zpos prop %u on GUI plane 56\n", zpos_prop);
         }
     }
-    if (zpos_prop)
-        fprintf(stderr, "kodi-shim: zpos prop %u present (steering via plane filter instead)\n", zpos_prop);
+    if (zpos_prop && !zpos_raised && !(flags & DRM_MODE_ATOMIC_TEST_ONLY)) {
+        zpos_raised = 1;
+        drmModeAtomicReqPtr zr = drmModeAtomicAlloc();
+        if (zr) {
+            drmModeAtomicAddProperty(zr, 56, zpos_prop, 8);
+            int rc = real_fn(fd, zr, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+            fprintf(stderr, "kodi-shim: raised GUI plane 56 zpos -> 8 (rc=%d)\n", rc);
+            drmModeAtomicFree(zr);
+        }
+    }
     return real_fn(fd, req, flags, user_data);
 }
 

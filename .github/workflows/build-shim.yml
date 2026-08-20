@@ -1,0 +1,49 @@
+# Cloud build for the kodi GBM shim (arm64) — the board never compiles it.
+# Tiny single-file build; the .so is attached to the release tag given as
+# input, so the board (or Mac) can curl it straight from the fast CDN.
+name: build-shim
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to attach kodi-shim.so to"
+        default: "kodi-shim-v30"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Install toolchain
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends gcc libc6-dev libdrm-dev curl ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Compile shim
+        run: cc -shared -fPIC -O2 -I/usr/include/libdrm -o kodi-shim.so shim/kodi-shim.c -ldrm -lpthread
+
+      - name: Verify interposed symbols
+        run: nm -D kodi-shim.so | grep -E "drmModeCreatePropertyBlob|drmModeAtomicCommit|drmModeGetPlane|eglSwapBuffers|eglInitialize"
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REL=$(curl -fsSL -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.release_tag }}" \
+            | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
+          echo "release id: $REL"
+          curl -fsSL -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @kodi-shim.so \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=kodi-shim.so" \
+            | grep -o '"browser_download_url": *"[^"]*"'
