@@ -72,30 +72,13 @@ drmModePlanePtr drmModeGetPlane(int fd, uint32_t plane_id)
     if (!real_fn)
         real_fn = (getplane_fn)dlsym(RTLD_NEXT, "drmModeGetPlane");
 
-    /* GUI plane steering (OSD-under-video fix): hide planes by id list in
-     * $KODI_SHIM_HIDE_PLANES (space-separated). The VOP2 driver stacks
-     * Esmart0 (video, zpos 1) above Cluster0 (zpos 0) and hardwires that
-     * order (raw zpos is ignored by normalization), so a GUI on Cluster0
-     * renders beneath every movie and OSD/menus are covered. Hiding the
-     * lower planes forces kodi's FindPlanes to a GUI plane with higher
-     * zpos. Plane ids are deterministic per boot for this kernel/board. */
-    static int32_t hide[8], hide_n = -1;
-    if (hide_n < 0) {
-        hide_n = 0;
-        const char *e = getenv("KODI_SHIM_HIDE_PLANES");
-        if (e)
-            for (const char *p = e; *p && hide_n < 8; ) {
-                hide[hide_n++] = (int32_t)strtol(p, (char **)&p, 10);
-                while (*p == " " || *p == ",") p++;
-            }
-        if (hide_n)
-            fprintf(stderr, "kodi-shim: hiding %d planes for steering\n", hide_n);
-    }
-    for (int i = 0; i < hide_n; i++)
-        if ((int32_t)plane_id == hide[i])
-            return NULL;
+/* Plane-steering REMOVED (2026-08-20): nondeterministic kernel deadlock —
+ * Cluster1/Esmart2 as GUI aborted kodi (recoverable) but intermittently
+ * wedged the VOP2 kernel on restart (board down, 3 incidents). VOP2 on
+ * this kernel accepts only Cluster0 as kodi GUI; zpos writes are ignored.
+ * OSD/subtitles-under-video is a kernel limitation; see journal §24. */
 
-    drmModePlanePtr plane = real_fn(fd, plane_id);
+drmModePlanePtr plane = real_fn(fd, plane_id);
     if (!plane) {
         if (g_log_planes)
             fprintf(stderr, "kodi-shim: GetPlane(%u) -> NULL\n", plane_id);
