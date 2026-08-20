@@ -92,11 +92,21 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/ffmpeg-5.1.9-rkmpp-base" \
             | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
           echo "release id: $REL"
+          # replace any existing same-named assets (422 on duplicates)
           for f in debs/libavcodec59_*_arm64.deb debs/libavcodec-extra59_*_arm64.deb; do
+            n=$(basename "$f")
+            aid=$(curl -fsSL -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$REL/assets" \
+              | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin) if x['name']=='$n']; print(a[0]['id'] if a else '')")
+            if [ -n "$aid" ]; then
+              echo "deleting old asset $n ($aid)"
+              curl -fsSL -X DELETE -H "Authorization: token $GH_TOKEN" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/assets/$aid" || true
+            fi
             curl -fsSL -X POST \
               -H "Authorization: token $GH_TOKEN" \
               -H "Content-Type: application/vnd.debian.binary-package" \
               --data-binary @"$f" \
-              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=$(basename $f)" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=$n" \
               | grep -o '"browser_download_url": *"[^"]*"'
           done
