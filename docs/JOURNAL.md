@@ -644,3 +644,14 @@ single bad plane-enable deadlocks this kernel; the crash-loop was a
 separate mechanism. Matrix final: Cluster0 works-but-below-video;
 Cluster1 aborts kodi; Esmart2 wedges kernel. No plane steering on
 6.1.84-8-rk2410. Mitigations: Kore/Yatse app; stop-menu-resume.
+
+## 25. CEC watchdog removed (2026-08-20)
+
+`cec-watch.sh` + `cec-watch.timer`/`.service` retired. History: the DRM
+re-detect "kick" caused two regressions (woke a standby TV via CEC, and
+paused music ~1s during the kick). Despite added guards (defer during any
+playback, only heal when TV answers "on"), the kick remains an inherently
+risky DRM re-detect on this kernel — not worth keeping for the convenience
+of auto-healing CEC after a TV-off boot. CEC recovery is now manual: restart
+kodi, or `echo detect > /sys/class/drm/card0-HDMI-A-1/status` once when the
+TV is on. Units + script removed from board and repo.
