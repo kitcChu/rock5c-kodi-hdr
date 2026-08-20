@@ -637,3 +637,10 @@ Post-fix: plays via av1 (rkmpp); kernel plane shows NV15 (10-bit) +
 BT.709; kodi CPU 41%. CI note: delete old release assets from a
 privileged gh session before upload (422 duplicates; job token can't
 DELETE).
+
+**OSD/plane saga closed (2026-08-20 14:45)**: Esmart2 (144) as kodi GUI
+hung the VOP2 kernel driver on first enable WITH restart limits active —
+single bad plane-enable deadlocks this kernel; the crash-loop was a
+separate mechanism. Matrix final: Cluster0 works-but-below-video;
+Cluster1 aborts kodi; Esmart2 wedges kernel. No plane steering on
+6.1.84-8-rk2410. Mitigations: Kore/Yatse app; stop-menu-resume.
