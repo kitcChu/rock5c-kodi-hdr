@@ -669,3 +669,16 @@ is f.f.f.f, and only when the TV answers "on" unless `--force`):
    phone (Kore/Yatse) when the remote/CEC is already dead.
 
 Manual CLI: `sudo cec-resync.sh [--force]`.
+
+## 27. OSD-on-top FIXED (2026-08-20) — the last problem, solved
+
+The VOP2 driver sorts active planes by RAW zpos (source-verified:
+sort(vop2_zpos,...)). Raw defaults: GUI Cluster0=0, video Esmart0=11 — the
+debugfs "normalized-zpos" field is a post-sort value and was what misled the
+earlier attempts. Shim v31 sets video(72)=0 + GUI(56)=8 in one standalone
+atomic commit (ALLOW_MODESET) inside kodi's drmModeAtomicCommit: GUI now
+sorts above video. rc=0, raw zpos verified 8/0, user confirmed OSD/menus
+render on top (subtitles too — same GUI plane). Release kodi-shim-v31;
+rollback = kodi-shim.so.bak-v30. Plane-steering (hide/swap) remains
+removed/forbidden — it wedged the kernel 3x; zpos is a property value,
+distinct and safe.
