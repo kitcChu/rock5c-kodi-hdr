@@ -626,3 +626,14 @@ Operational notes:
   verify `apt-mark showhold` after dpkg/apt ops).
 - Stage 2 (pending): AV1 HDR10 mastering export via
   mpp_frame_get_mastering_display (API confirmed present in MPP 1.5).
+
+## 23. AV1 in-MKV fix + 10-bit verification (2026-08-20) — DONE
+
+Real 4K 10-bit AV1 movie spun forever: extradata is an av1C config record
+in MKV; MPP needs raw OBUs (sequence header not repeated in-band).
+patch_rkmpp_av1.sh hunk 6 strips the 4-byte header. Capability matrix
+proven on real stream: 4K 8-bit ✓, 4K 10-bit ✓, movie extract ✓.
+Post-fix: plays via av1 (rkmpp); kernel plane shows NV15 (10-bit) +
+BT.709; kodi CPU 41%. CI note: delete old release assets from a
+privileged gh session before upload (422 duplicates; job token can't
+DELETE).
