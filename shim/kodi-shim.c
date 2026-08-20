@@ -47,6 +47,24 @@ static int bad_format(uint32_t fourcc)
 }
 
 typedef drmModePlanePtr (*getplane_fn)(int fd, uint32_t plane_id);
+typedef drmModePlaneResPtr (*planeres_fn)(int fd);
+
+static int g_log_planes = 1; /* one-shot diagnostic logging */
+
+drmModePlaneResPtr drmModeGetPlaneResources(int fd)
+{
+    static planeres_fn real_fn;
+    if (!real_fn)
+        real_fn = (planeres_fn)dlsym(RTLD_NEXT, "drmModeGetPlaneResources");
+    drmModePlaneResPtr r = real_fn(fd);
+    if (r && g_log_planes) {
+        fprintf(stderr, "kodi-shim: plane resources: %d planes:", r->count_planes);
+        for (uint32_t i = 0; i < r->count_planes && i < 12; i++)
+            fprintf(stderr, " %u", r->planes[i]);
+        fprintf(stderr, "\n");
+    }
+    return r;
+}
 
 drmModePlanePtr drmModeGetPlane(int fd, uint32_t plane_id)
 {
@@ -54,9 +72,47 @@ drmModePlanePtr drmModeGetPlane(int fd, uint32_t plane_id)
     if (!real_fn)
         real_fn = (getplane_fn)dlsym(RTLD_NEXT, "drmModeGetPlane");
 
+    /* GUI plane steering (OSD-under-video fix): hide planes by id list in
+     * $KODI_SHIM_HIDE_PLANES (space-separated). The VOP2 driver stacks
+     * Esmart0 (video, zpos 1) above Cluster0 (zpos 0) and hardwires that
+     * order (raw zpos is ignored by normalization), so a GUI on Cluster0
+     * renders beneath every movie and OSD/menus are covered. Hiding the
+     * lower planes forces kodi's FindPlanes to a GUI plane with higher
+     * zpos. Plane ids are deterministic per boot for this kernel/board. */
+    static int32_t hide[8], hide_n = -1;
+    if (hide_n < 0) {
+        hide_n = 0;
+        const char *e = getenv("KODI_SHIM_HIDE_PLANES");
+        if (e)
+            for (const char *p = e; *p && hide_n < 8; ) {
+                hide[hide_n++] = (int32_t)strtol(p, (char **)&p, 10);
+                while (*p == " " || *p == ",") p++;
+            }
+        if (hide_n)
+            fprintf(stderr, "kodi-shim: hiding %d planes for steering\n", hide_n);
+    }
+    for (int i = 0; i < hide_n; i++)
+        if ((int32_t)plane_id == hide[i])
+            return NULL;
+
     drmModePlanePtr plane = real_fn(fd, plane_id);
-    if (!plane)
+    if (!plane) {
+        if (g_log_planes)
+            fprintf(stderr, "kodi-shim: GetPlane(%u) -> NULL\n", plane_id);
         return plane;
+    }
+    if (g_log_planes) {
+        int ar24 = 0, xr24 = 0, nv12 = 0, nv15 = 0;
+        for (uint32_t i = 0; i < plane->count_formats; i++) {
+            if (plane->formats[i] == DRM_FORMAT_ARGB8888) ar24 = 1;
+            if (plane->formats[i] == DRM_FORMAT_XRGB8888) xr24 = 1;
+            if (plane->formats[i] == DRM_FORMAT_NV12) nv12 = 1;
+            if (plane->formats[i] == DRM_FORMAT_NV15) nv15 = 1;
+        }
+        fprintf(stderr, "kodi-shim: plane %u: %u fmts ar24=%d xr24=%d nv12=%d nv15=%d crtcs=%x\n",
+                plane_id, plane->count_formats, ar24, xr24, nv12, nv15,
+                plane->possible_crtcs);
+    }
 
     uint32_t kept = 0;
     for (uint32_t i = 0; i < plane->count_formats; i++) {
@@ -184,6 +240,50 @@ int drmModeCreatePropertyBlob(int fd, const void *data, size_t size, uint32_t *i
         }
     }
     return real_fn(fd, data, size, id);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. GUI-on-top fix: raise GUI plane zpos inside kodi's atomic commits  */
+/* ------------------------------------------------------------------ */
+/*
+ * kodi 20.1 GBM never sets plane zpos (verified: no zpos code in the
+ * 20.1 DRM layer). The VOP2 driver default order stacks the Esmart
+ * video plane (zpos=1) ABOVE the Cluster0 GUI plane (zpos=0), so every
+ * OSD/menu renders beneath the movie during playback. Setting zpos from
+ * outside fails: kodi holds DRM master, external writes get EACCES.
+ * Fix: interpose kodi's own drmModeAtomicCommit (kodi.bin imports it) and
+ * append a zpos property for the GUI plane to each commit. Kodi is master,
+ * so its own commit succeeds. Idempotent value, harmless on test commits.
+ * GUI plane 56 (Cluster0-win0) and video plane 72 (Esmart0-win0) ids are
+ * deterministic for this kernel/board; shim is build-ID-locked anyway.
+ */
+typedef int (*atomic_commit_fn)(int, drmModeAtomicReqPtr, uint32_t, void *);
+
+int drmModeAtomicCommit(int fd, drmModeAtomicReqPtr req, uint32_t flags, void *user_data)
+{
+    static atomic_commit_fn real_fn;
+    static uint32_t zpos_prop; /* informational */
+    if (!real_fn)
+        real_fn = (atomic_commit_fn)dlsym(RTLD_NEXT, "drmModeAtomicCommit");
+    if (!zpos_prop) {
+        drmModeObjectPropertiesPtr props =
+            drmModeObjectGetProperties(fd, 56, DRM_MODE_OBJECT_PLANE);
+        if (props) {
+            for (uint32_t i = 0; i < props->count_props; i++) {
+                drmModePropertyPtr p = drmModeGetProperty(fd, props->props[i]);
+                if (p && !strcmp(p->name, "zpos"))
+                    zpos_prop = p->prop_id;
+                if (p)
+                    drmModeFreeProperty(p);
+            }
+            drmModeFreeObjectProperties(props);
+            if (zpos_prop)
+                fprintf(stderr, "kodi-shim: zpos prop %u on GUI plane 56\n", zpos_prop);
+        }
+    }
+    if (zpos_prop)
+        fprintf(stderr, "kodi-shim: zpos prop %u present (steering via plane filter instead)\n", zpos_prop);
+    return real_fn(fd, req, flags, user_data);
 }
 
 typedef int (*eglinit_fn)(void *, int *, int *);
