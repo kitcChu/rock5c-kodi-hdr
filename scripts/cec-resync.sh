@@ -1,54 +1,57 @@
 #!/bin/sh
-# cec-resync.sh — ONE-SHOT CEC re-sync. Run manually when the TV remote/CEC
-# stops working (typically after the board booted with the TV off, so CEC
-# never registered: phys addr f.f.f.f).
-#
-# Safety (learned the hard way): a DRM connector re-detect wakes a standby
-# TV via CEC and briefly stutters audio. So by default we only kick when the
-# TV actively answers "on" to a power query (or the query is inconclusive,
-# e.g. CEC fully dead). If the TV reports "standby", we refuse unless you
-# pass --force.
-#
-# Usage:  sudo cec-resync.sh [--force]
-#   --force   kick even if the TV reports standby
-LOG=/var/log/cec-resync.log
+# cec-resync.sh — manually re-sync CEC after the TV powered on late (or hotplug).
+# The old automated watchdog is removed (user request); run this by hand:
+#   sudo cec-resync          (safe: refuses while video is playing)
+#   sudo cec-resync --force  (kick anyway)
+LOG=/var/log/cec-watch.log
 TV=/sys/class/drm/card0-HDMI-A-1/status
+log() { echo "$(date +%Y-%m-%dT%H:%M:%S) MANUAL $*" >> "$LOG"; }
+
 FORCE=0
 [ "$1" = "--force" ] && FORCE=1
 
-log() { echo "$(date +%Y-%m-%dT%H:%M:%S) $*" | tee -a "$LOG"; }
+[ -f "$TV" ] || { echo "no $TV"; exit 1; }
+[ "$(cat $TV)" = "connected" ] || { echo "TV not connected (status=$(cat $TV))"; exit 1; }
 
-[ "$(id -u)" = "0" ] || { echo "run as root: sudo cec-resync.sh" >&2; exit 1; }
-[ -f "$TV" ] || { log "ERROR: no connector status file at $TV"; exit 1; }
-[ "$(cat "$TV")" = "connected" ] || { log "TV not connected (status=$(cat "$TV")), nothing to re-sync"; exit 1; }
-
-PA=$(cec-ctl -d 0 --logical-addresses 2>/dev/null | grep "Physical Address" | awk '{print $4}')
+PA=$(cec-ctl -d 0 --logical-addresses 2>/dev/null | grep "Physical Address" | awk "{print \$4}")
 [ -n "$PA" ] || PA=$(cec-ctl -d 0 --logical-addresses 2>/dev/null | grep -oE "[0-9a-f]\.[0-9a-f]\.[0-9a-f]\.[0-9a-f]" | head -1)
-log "CEC phys addr = $PA"
-[ "$PA" = "f.f.f.f" ] || { log "CEC already healthy — nothing to do"; exit 0; }
+echo "CEC physical address: $PA (healthy=1.0.0.0, broken=f.f.f.f)"
+[ "$PA" = "f.f.f.f" ] || { echo "CEC already healthy — nothing to do."; exit 0; }
 
-TV_POWER=$(timeout 6 cec-ctl -d 0 -t 0 --give-device-power-status 2>/dev/null \
-           | grep -oE "pwr-state: (on|standby|to-on|to-standby)" | awk '{print $2}')
-log "TV power state = ${TV_POWER:-unknown}"
+if [ "$FORCE" = "0" ]; then
+  PLAYING=$(timeout 4 python3 - << "PYEOF" 2>/dev/null
+import json, socket
+s = socket.create_connection(("127.0.0.1", 9090), timeout=3)
+s.sendall(bmethod:Player.GetActivePlayersx00)
+buf = b""
+s.settimeout(3)
+try:
+    while True:
+        c = s.recv(65536)
+        if not c: break
+        buf += c
+        if b"\x00" in buf: break
+except Exception:
+    pass
+s.close()
+try:
+    players = json.loads(buf.split(b"\x00")[0].decode()).get("result", [])
+    print(1 if any(p.get("type") == "video" for p in players) else 0)
+except Exception:
+    print(1)
+PYEOF
+)
+  if [ "$PLAYING" = "1" ]; then
+    echo "Video is playing — refusing to kick (would blink the screen). Use --force to override."
+    exit 1
+  fi
+fi
 
-case "$TV_POWER" in
-  standby|to-standby)
-    if [ "$FORCE" = "0" ]; then
-      log "TV is in standby — refusing to kick (it would wake the TV). Use --force to override."
-      exit 0
-    fi
-    log "forced kick despite standby"
-    ;;
-esac
-
-log "re-syncing: DRM connector re-detect"
+echo "kicking DRM re-detect..."
+log "kicking DRM re-detect"
 echo detect > "$TV"
 sleep 3
-PA2=$(cec-ctl -d 0 --logical-addresses 2>/dev/null | grep "Physical Address" | awk '{print $4}')
-log "after re-detect: phys addr = $PA2"
-if [ "$PA2" = "f.f.f.f" ]; then
-  log "still unregistered — try: sudo systemctl restart kodi"
-  exit 1
-fi
-log "CEC re-synced OK"
+PA2=$(cec-ctl -d 0 --logical-addresses 2>/dev/null | grep "Physical Address" | awk "{print \$4}")
+echo "after kick: $PA2"
+[ "$PA2" = "f.f.f.f" ] && echo "WARNING: still unregistered" || echo "CEC recovered ✓"
 exit 0
