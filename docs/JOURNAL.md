@@ -829,3 +829,46 @@ mpp hardware decoder up. Kodi takes ~35 s to restart on this board.
 
 **Caveat**: webinterface.default is under /usr/share — Kodi upgrades may
 overwrite index.html; re-run `kodi-web-restart/deploy.sh` (idempotent).
+
+## 32. Sound died + movie froze — Kodi passthrough vs Qutest Class 2 S32 (2026-08-29)
+
+After the TV-unplug/HDMI saga (§31), sound stopped reaching the Chord Qutest
+and movies froze. Two distinct symptoms, one root cause.
+
+**Timeline**: TV unplugged → kodi restarted several times (20:04/20:10/20:11)
+→ DAC worked at 20:10 (S32NE, hw:Qutest) → movie with EAC3 audio at 20:36 →
+sink open failed → audio renderer failed → movie frozen (A/V sync stall) →
+rkvdec2 reset loops + DRM "plane invisible" errors while kodi retried.
+
+**Debug findings**:
+- `CAESinkALSA::InitializeHW - Unable to find a suitable output format`
+  opening `ALSA:iec958:CARD=Qutest,DEV=0` (the passthrough device), then
+  `sysdefault`; kodi requested AE_FMT_S16NE (the compressed-bitstream format)
+  ⇒ kodi was in passthrough mode for the movie's AC3/EAC3 audio.
+- Qutest USB interface enumerates **Class 2, S32_LE only** (rates 32k–768k).
+  The ALSA `iec958` plugin only carries 16/20/24-bit ⇒ it can never bridge
+  to an S32-only DAC. The passthrough device setting was fundamentally
+  incompatible.
+- Qutest is a **native-rate DAC (no SRC)**: `hw_params` showed it locked at
+  44100 Hz (the last FLAC) — it tracks whatever rate the source sends and
+  will re-lock when kodi re-opens the sink at 48 kHz for a movie. The DAC was
+  healthy; kodi's sink selection was broken.
+- guisettings.xml had `audiooutput.ac3passthrough` = **true** (a legacy
+  leftover) ⇒ kodi tried passthrough for movie audio.
+- Bonus gotcha: the Qutest re-enumerated card index 2 → 0 after a USB reset;
+  `hw:CARD=Qutest` (name-based) still resolves correctly.
+
+**Fix** (in `scripts/set-kodi-audio.py`, which runs at every kodi start):
+- Force ALL passthrough toggles off: ac3, eac3, dts, truehd, dtshd.
+- kodi then decodes everything to PCM and uses `audiooutput.audiodevice`
+  (`ALSA:hw:CARD=Qutest,DEV=0`) → S32NE → sink opens cleanly at any rate.
+- Correct config for a 2ch PCM DAC: passthrough is never appropriate (the
+  Qutest cannot decode compressed audio — passing it through would output
+  noise even if the format bridged).
+
+**Verified**: after `systemctl restart kodi`, sink opens
+`ALSA:hw:CARD=Qutest,DEV=0` with `AE_FMT_S32NE`; movie playback restored.
+
+**Lesson**: the "frozen movie + decoder resets" was collateral — the video
+pipeline stalls on A/V sync while the audio sink can't open. Always check the
+audio sink first when video freezes with no obvious decoder fault.
