@@ -805,3 +805,27 @@ module streamed its idle frame but its RF data never made it out cleanly).
 - Known limitation (documented): out-of-range >4 m reports EMPTY → will
   pause playback when the family eats at the dining table. User-approved
   behavior (the "finish your dinner" nudge).
+
+## 31. Kodi web UI "Restart" button (2026-08-29)
+
+TV-unplug incident (§: kodi ran with HDMI dead → `DestroyWindow:
+deinitialized GBM`, never re-created window on hotplug; fix = restart kodi
+service with TV connected) → user asked for a one-click fix in the web UI.
+
+**Solution** (3 pieces, all in `kodi-web-restart/`):
+1. `/etc/sudoers.d/kodi-restart` — `radxa ALL=(root) NOPASSWD:
+   /usr/bin/systemctl restart kodi` (scoped to exactly one command; follows
+   the cec-resync precedent)
+2. `script.restart-kodi` addon (`~/.kodi/addons/`) — fires
+   `sudo -n systemctl restart kodi` detached (`start_new_session=True` so
+   Kodi's addon-process group kill can't abort the systemd transaction);
+   logs to `~/restart-kodi.log`
+3. Web button: `webinterface.default/index.html` patched (nav item +
+   inline handler → `Addons.ExecuteAddon`; idempotent, `.bak` kept)
+
+**Verified end-to-end**: ExecuteAddon → addon ran (log line) → kodi
+Stopped/Started (20:11:15→20:11:50, ~35 s boot) → 4K modeset +
+mpp hardware decoder up. Kodi takes ~35 s to restart on this board.
+
+**Caveat**: webinterface.default is under /usr/share — Kodi upgrades may
+overwrite index.html; re-run `kodi-web-restart/deploy.sh` (idempotent).
