@@ -682,3 +682,39 @@ render on top (subtitles too — same GUI plane). Release kodi-shim-v31;
 rollback = kodi-shim.so.bak-v30. Plane-steering (hide/swap) remains
 removed/forbidden — it wedged the kernel 3x; zpos is a property value,
 distinct and safe.
+
+## 28. HKL-LD2450 clone — DOA, RF front-end dead (2026-08-20)
+
+Replacement for the dead RD-03D arrived as a **"HKL-LD2450"** (HKL ≠ Hi-Link
+HLK — a Taobao clone of the LD2450A multi-target radar). Wired to the same
+UART6-M1 pins (19/21, mux already permanent) at 5V (measured 4.98V DC).
+
+**Protocol analysis (exhaustive):**
+- Streams at 256000: a constant 16-byte frame `AA 10 B0 00 FF 00 00 00 00
+  00 00 00 00 00 5F 55`, ~10 Hz, perfectly periodic (inter-`AA` gap = 16
+  bytes, 51/51 frames identical). XOR checksum validates (`10^B0^FF = 5F`)
+  ⇒ genuine UART frame, 256000 confirmed.
+- **Never changes**: 300+ frames with a hand 5–10 cm directly in front —
+  zero variation. Not live detection data; a heartbeat beacon.
+- **Ignores every command**: LD2450A config framing (`FD FC FB FA … 04 03
+  02 01`: enable/disable conf, query version, reset, restart, single/multi
+  target mode, set baud) at 256000 and 115200; also tried `AA FF 03 00` and
+  `F4 F3 F2 F1` data-header-wrapped variants, and echoing the heartbeat
+  itself. No response, stream never interrupted.
+- No other frame pattern anywhere (no `AA FF 03 00`, no `55 CC`, no
+  `FD FC FB FA`, no `F4 F3 F2 F1`) in 816-byte full-stream scans.
+
+**Verdict**: MCU boots (valid heartbeat) but the 24 GHz RF front-end never
+initializes — same failure mode as the RD-03D (§18). Not a baud/wiring/
+protocol problem: 5V confirmed, cold power-cycle done, 4-pin module,
+command path verified only by the absence of any response.
+
+**Lesson**: cheap "HKL-" clones (Taobao) of HLK radars can ship DOA. For
+presence detection we do NOT need multi-target XY tracking — a presence-only
+module is simpler and more reliable.
+
+**Plan**: return the clone; replace with a genuine **HLK-LD2410B** (moving +
+static human detection, documented `F4 F3 F2 F1`/`F8 F7 F6 F5` framing at
+115200, ~HK$80, ESPHome/HA ecosystem). Infra needs zero board changes (mux,
+UART6, pins 19/21); only `radar_reader.py` parser swaps to the LD2410B
+19-byte frame. Presence agent stays DISABLED until a working module lands.
