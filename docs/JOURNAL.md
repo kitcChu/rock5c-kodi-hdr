@@ -683,7 +683,16 @@ rollback = kodi-shim.so.bak-v30. Plane-steering (hide/swap) remains
 removed/forbidden — it wedged the kernel 3x; zpos is a property value,
 distinct and safe.
 
-## 28. HKL-LD2450 clone — DOA, RF front-end dead (2026-08-20)
+## 28. HKL-LD2450 clone — believed DOA (2026-08-20) ⚠️ VERDICT RETRACTED — see §30
+
+> **RETRACTION (same day, §30)**: the "dead RF front-end" verdict below was
+> WRONG. After the module was moved to UART4-M2 (pins 7/29) it detects
+> motion AND static humans reliably. The earlier 300-frame "constant
+> heartbeat" observation was a real state at the time, but the module
+> recovered/detects now — most likely the pins-19/21 connection was
+> marginal (partial contact on TX/RX lines) and the re-seat during the
+> UART4 move restored it. Keep §28 for the analysis trail; §30 supersedes
+> the conclusion.
 
 Replacement for the dead RD-03D arrived as a **"HKL-LD2450"** (HKL ≠ Hi-Link
 HLK — a Taobao clone of the LD2450A multi-target radar). Wired to the same
@@ -718,6 +727,9 @@ static human detection, documented `F4 F3 F2 F1`/`F8 F7 F6 F5` framing at
 115200, ~HK$80, ESPHome/HA ecosystem). Infra needs zero board changes (mux,
 UART6, pins 19/21); only `radar_reader.py` parser swaps to the LD2410B
 19-byte frame. Presence agent stays DISABLED until a working module lands.
+
+**⚠️ SUPERSEDED — do not order the LD2410B.** The module works; see §30.
+The LD2410B purchase plan is cancelled unless §30 verification fails.
 
 ## 29. Radar moved to UART4-M2 — pins 7/29 via DTS overlay (2026-08-20)
 
@@ -754,3 +766,42 @@ HKL clone heartbeat won't decode, expected, module is DOA per §28).
   avoid gpioset/gpioget on them now they're UART4-claimed).
 - Next: LD2410B arrival → rewrite radar_reader parser for the
   `F4 F3 F2 F1`/`F8 F7 F6 F5` framing @115200, re-enable presence agent.
+
+## 30. HKL-LD2450 WORKS — protocol decoded, static detection verified (2026-08-20)
+
+**Retraction of §28's DOA verdict.** After the move to UART4-M2 (pins 7/29,
+§29), the module detects. What changed: physical re-seat of the TX/RX wires
+during the pin move (the pins-19/21 connection was the likely fault — the
+module streamed its idle frame but its RF data never made it out cleanly).
+
+**Protocol (fully decoded, checksum-verified):**
+- 16-byte frames @256000, ~10 Hz: `AA 10 B0 [P] [D] 00 00 20 00 4E 00 32 00 00 [X] 55`
+- `10` = frame length (0x10 = 16); `B0` = constant type/version byte
+- **`P` = presence**: `0x00` no target / `0x01` target present (byte 3)
+- **`D` = distance**: `0xFF` = none, else range value (byte 4) — observed
+  hand-wave 74–128, seated couch 144–191
+- bytes 5–13: zeros when idle; `00 00 20 00 4E 00 32 00 00` when tracking
+  (constants — likely thresholds/zone config echoed in the frame)
+- `X` = XOR checksum of bytes 1–13; `55` = trailer
+- No config commands needed; ignores all LD2450A/LD2410B command framings
+  (module has no command interface — it's a dumb streaming presence sensor)
+
+**Verification (live tests):**
+- Hand wave at 0.1–2 m: 36 unique frames over 120 s, D tracked 74→128,
+  zero garbage bytes, checksums valid on every frame
+- Stop waving → 60/60 idle frames (P=0x00, D=0xFF) within a second
+- 3-min presence timeline (sit still on couch / dining table / return):
+  PRESENT(d=144–191) while seated still on couch — **static human detection
+  confirmed**; EMPTY at the dining table (>4 m = out of range, same as the
+  RD-03D — which per user preference is the desired "finish dinner" nudge)
+
+**Implications:**
+- **Do NOT order the LD2410B** (§28 plan cancelled). The HKL-LD2450 meets
+  the presence need: static + moving human detection at couch range.
+- `radar_reader.py` parser must be rewritten for this frame: presence =
+  byte 3 != 0 (ignore the RD-03D `AA FF 03 00`/`55 CC` framing).
+- Re-enable the presence agent with the user's preferred 3 s empty-debounce
+  once the parser is in place.
+- Known limitation (documented): out-of-range >4 m reports EMPTY → will
+  pause playback when the family eats at the dining table. User-approved
+  behavior (the "finish your dinner" nudge).
