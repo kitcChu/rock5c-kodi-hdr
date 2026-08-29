@@ -121,6 +121,13 @@ With Kodi stopped, merge into `~/.kodi/userdata/guisettings.xml`:
 
 ## 5. Audio automation (Kodi resets the device on every start)
 
+**IMPORTANT — disable passthrough** (see JOURNAL §32): the Qutest is a 2ch
+PCM DAC with a Class 2 USB interface (S32-only). The ALSA `iec958`
+passthrough plugin cannot bridge S32, so any passthrough attempt makes the
+sink open fail ("Unable to find a suitable output format") and freezes
+playback. `set-kodi-audio.py` now forces all passthrough toggles off at
+every start; if you ever edit audio settings in the GUI, re-run it.
+
 ```sh
 sudo cp scripts/set-kodi-audio.py /usr/local/bin/
 sudo cp scripts/kodi-audio.service /etc/systemd/system/
@@ -164,4 +171,6 @@ cat /proc/asound/card0/pcm0p/sub0/hw_params
 | Screen frozen after seek | pre-patch-5 lib | same |
 | Dim/washed HDR | metadata missing (pre-patch-6) | same; verify blob |
 | Board reboots under load | thermal (no heatsink) / PSU | add heatsink; use official 5V/5A PSU |
+| Sound dead / movie frozen, `Unable to find a suitable output format` in log | kodi tried passthrough (iec958) to an S32-only Class 2 DAC | `sudo python3 /usr/local/bin/set-kodi-audio.py` (forces passthrough off); check `audiooutput.*passthrough` = false |
+| DAC locked at wrong rate (`hw_params` shows old FLAC rate) | native-rate DAC, no SRC — by design | normal; kodi re-opens the sink at the stream rate. Verify with `cat /proc/asound/card0/pcm0p/sub0/hw_params` while playing |
 | `apt-get install libavcodec-dev` broke HW decode | it replaced `libavcodec.so.59` with stock | reinstall built `libavcodec-extra59` deb |
