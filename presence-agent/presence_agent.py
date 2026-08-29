@@ -2,7 +2,7 @@
 """presence_agent.py — RD-03D radar → room presence → Kodi (Rock 5C home theater).
 
 Pipeline (2GB RAM budget — radar gates camera AND mic):
-  radar (/dev/ttyS6) ──▶ presence state (debounced) ──▶ policy engine
+  radar (/dev/ttyS4) ──▶ presence state (debounced) ──▶ policy engine
                                                           │
         Kodi JSON-RPC (127.0.0.1:9090, localhost only) ◀──┘  (pause/resume only)
         camera C922 (face ID, NPU) — gated by presence        (milestone 6)

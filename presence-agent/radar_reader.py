@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""radar_reader.py — RD-03D 24GHz mmWave radar reader (Rock 5C, /dev/ttyS6).
+"""radar_reader.py — 24GHz mmWave radar reader (Rock 5C, /dev/ttyS4).
+
+NOTE: radar now on UART4-M2 (pins 7/29, GPIO1_B3/B2) via the
+rk3588-uart4-m2.dtbo overlay; port moved from /dev/ttyS6 to /dev/ttyS4.
+Parser is protocol-agnostic: it scans for a frame header byte (default 0xAA)
+and trailing 0x55, emitting any variable-length frame body for the agent.
 
 Protocol (V1, verified live on hardware 2026-08-18):
   frame = AA FF 03 00 [24-byte body] 55 CC   @ 256000 baud, streamed ~11 fps
@@ -17,7 +22,7 @@ import os
 import sys
 import time
 
-SERIAL_PORT = os.environ.get("RADAR_PORT", "/dev/ttyS6")
+SERIAL_PORT = os.environ.get("RADAR_PORT", "/dev/ttyS4")
 BAUD = 256000
 
 V1_HEADER = b"\xaa\xff\x03\x00"
