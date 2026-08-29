@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="script.restart-kodi" name="Restart Kodi" version="1.0.0" provider-name="kit">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0"/>
+  </requires>
+  <extension point="xbmc.python.script" library="default.py"/>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en">Restart the Kodi service (HDMI display re-init)</summary>
+    <description lang="en">Triggers sudo systemctl restart kodi. Use when the HDMI display fails to come up after the TV was unplugged.</description>
+  </extension>
+</addon>

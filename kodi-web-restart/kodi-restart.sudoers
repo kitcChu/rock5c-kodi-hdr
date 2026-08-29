@@ -1,0 +1,2 @@
+# Kodi web UI "Restart" button: passwordless restart of the kodi service
+radxa ALL=(root) NOPASSWD: /usr/bin/systemctl restart kodi
