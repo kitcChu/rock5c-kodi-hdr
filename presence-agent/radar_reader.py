@@ -38,8 +38,25 @@ NO_DISTANCE = 0xFF
 class RadarReader:
     def __init__(self, port=SERIAL_PORT, baud=BAUD):
         import serial
+        self.port = port
+        self.baud = baud
         self.ser = serial.Serial(port, baud, timeout=0.5)
         self.buf = bytearray()
+
+    def _reopen(self):
+        """Recover from a wedged port (e.g. another process opened it)."""
+        import serial
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+        time.sleep(0.5)
+        try:
+            self.ser = serial.Serial(self.port, self.baud, timeout=0.5)
+            self.buf = bytearray()
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def _checksum_ok(fr):
@@ -76,13 +93,27 @@ class RadarReader:
         }
 
     def read_frame(self, timeout=5):
-        """Block until one valid frame. Returns dict or None on timeout."""
+        """Return the next valid frame, or None after `timeout` seconds.
+
+        Parses anything already buffered FIRST (a single port read usually
+        carries several frames), so we never stall on the port while frames
+        are pending.
+        """
         import serial
+        fr = self._try_frame()
+        if fr:
+            return fr
         t0 = time.time()
         while time.time() - t0 < timeout:
             try:
-                chunk = self.ser.read(256)
+                # read only what is actually available: read(size) blocks for
+                # the whole timeout when fewer than `size` bytes arrive
+                n = getattr(self.ser, "in_waiting", 0) or 1
+                chunk = self.ser.read(n)
             except serial.SerialException:
+                # multiple-access / device error: reopen or the reader spins
+                # blind forever (this silently stopped the agent once)
+                self._reopen()
                 return None
             if chunk:
                 self.buf += chunk

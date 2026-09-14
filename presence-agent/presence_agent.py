@@ -28,6 +28,34 @@ KODI_PORT = int(os.environ.get("KODI_PORT", "9090"))
 DEBOUNCE_EMPTY = float(os.environ.get("DEBOUNCE_EMPTY", "5.0"))    # sec of empty → act
 DEBOUNCE_PRESENT = float(os.environ.get("DEBOUNCE_PRESENT", "1.5"))  # sec of person → act
 POLL = float(os.environ.get("RADAR_POLL", "0.5"))
+# Hold model: a SINGLE detection marks us present and keeps us present for
+# PRESENCE_HOLD seconds. The HKL-LD2450's returns are sparse at range
+# (e.g. 3/30 frames at 1.5 m), so requiring continuous presence would mean
+# it could pause but never resume. Pause only after DEBOUNCE_EMPTY of true
+# silence (no frame at all).
+PRESENCE_HOLD = float(os.environ.get("PRESENCE_HOLD", "4.0"))
+# RADAR_DEBUG=1: log every present frame + a 20 s frame-count heartbeat
+DEBUG = os.environ.get("RADAR_DEBUG", "") == "1"
+
+# Persist "we paused it" across agent restarts, so a restart (deploy, crash)
+# doesn't strand playback paused forever. /run is tmpfs: a reboot resets it.
+STATE_FILE = os.environ.get("PRESENCE_STATE", "/run/presence-agent.paused")
+
+
+def load_paused_flag():
+    try:
+        with open(STATE_FILE) as f:
+            return f.read().strip() == "1"
+    except Exception:
+        return False
+
+
+def save_paused_flag(value):
+    try:
+        with open(STATE_FILE, "w") as f:
+            f.write("1" if value else "0")
+    except Exception:
+        pass
 # Distance gate: presence only counts within this many units of the raw
 # distance byte (0 = no gate). Calibrated on the Rock 5C install: the raw
 # byte reads ~cm (couch seated ≈ 144-191, i.e. ~1.5-1.9 m).
@@ -53,8 +81,14 @@ def kodi_rpc(method, params=None):
                 if not c:
                     break
                 buf += c
-                if b"\x00" in buf:
+                # return as soon as the JSON is complete: kodi's TCP json-rpc
+                # does not guarantee a trailing NUL/newline, and waiting for
+                # one cost a full 3 s socket timeout per call
+                try:
+                    json.loads(buf.decode())
                     break
+                except Exception:
+                    continue
         except socket.timeout:
             pass
         s.close()
@@ -134,14 +168,18 @@ def resume():
 
 # ---------- main ----------
 def main():
-    print(f"{ts()} presence-agent starting (debounce empty={DEBOUNCE_EMPTY}s present={DEBOUNCE_PRESENT}s)", flush=True)
+    print(f"{ts()} presence-agent starting (hold={PRESENCE_HOLD}s empty={DEBOUNCE_EMPTY}s types={sorted(PAUSE_TYPES)})", flush=True)
     radar = RadarReader()
 
     # state
     state = "unknown"            # 'empty' | 'present'
-    since = time.time()
-    last_announce = 0
-    paused_by_us = False
+    # start out "empty" (sane silence value) but a single detection flips it
+    last_seen = time.time() - DEBOUNCE_EMPTY - 1
+    paused_by_us = load_paused_flag()
+    nframes = 0
+    npresent = 0
+    last_dbg = 0.0
+    last_enforce = 0.0
 
     try:
         while True:
@@ -155,29 +193,46 @@ def main():
             dist = fr.get("distance")
 
             now = time.time()
+            nframes += 1
             if present:
+                npresent += 1
+            if present:
+                last_seen = now
+            silence = now - last_seen
+
+            if DEBUG:
+                if present:
+                    print(f"{ts()} DEBUG present frame dist={dist}", flush=True)
+                if now - last_dbg >= 20:
+                    last_dbg = now
+                    print(f"{ts()} DEBUG frames={nframes} present_frames={npresent} silence={silence:.1f}s", flush=True)
+
+            if silence <= PRESENCE_HOLD:
+                # someone is (or was just) there -> present
                 if state != "present":
-                    prev = state
                     state = "present"
-                    since = now
-                    print(f"{ts()} PRESENT dist={dist} (was {prev})", flush=True)
-                elif paused_by_us and now - since >= DEBOUNCE_PRESENT:
-                    resume()
-                    paused_by_us = False
-            else:
+                    print(f"{ts()} PRESENT dist={dist} (silence {silence:.1f}s)", flush=True)
+                    if paused_by_us:
+                        resume()
+                        paused_by_us = False
+                        save_paused_flag(False)
+            elif silence >= DEBOUNCE_EMPTY:
+                # nobody for DEBOUNCE_EMPTY seconds -> empty
                 if state != "empty":
-                    prev = state
                     state = "empty"
-                    since = now
-                    print(f"{ts()} EMPTY (was {prev})", flush=True)
-                elif now - since >= DEBOUNCE_EMPTY:
-                    # enforce pause as soon as the debounce elapses (not gated
-                    # on the announce throttle) so the 5 s contract is exact
+                    print(f"{ts()} EMPTY (no presence for {silence:.1f}s)", flush=True)
+                # enforce pause (throttled: kodi RPCs must never starve the
+                # radar read loop)
+                if now - last_enforce >= 1.0:
+                    last_enforce = now
                     if playing_target() and not is_paused():
                         pause()
                         paused_by_us = True
+                        save_paused_flag(True)
 
-            time.sleep(POLL)
+            # NOTE: no sleep here. The radar paces the loop at ~10 Hz; an
+            # unconditional sleep made the agent process only 2 frames/s and
+            # work through a ~25 s backlog of stale frames.
     except KeyboardInterrupt:
         radar.close()
         print(f"{ts()} presence-agent stopped", flush=True)

@@ -916,3 +916,50 @@ presence.
 **Known limitation**: because the radar sees ≈2 m, anyone further away reads
 as empty and playback pauses. That is the desired "finish your dinner" nudge
 behaviour, but means a 3 m viewer is treated as absent.
+
+## 34. Presence agent debugging — three bugs that made it blind (2026-09-14)
+
+The agent was "working" but never resumed playback. Debug mode
+(`RADAR_DEBUG=1`) exposed the truth: it processed **3 radar frames per 28 s**
+while the module streams 10 Hz. Three independent bugs:
+
+1. **`time.sleep(POLL)` at the end of every loop iteration** — the agent
+   processed at most 2 frames/s (1/0.5s) against a 10 Hz stream, so it acted
+   on ~25 s-**stale** frames from the tty buffer. Removed: the radar paces the
+   loop. Result: **10.1 frames/s** (matches the module exactly).
+2. **`kodi_rpc` waited for a NUL terminator** that Kodi's TCP JSON-RPC never
+   sends → every call blocked for the full 3 s socket timeout. The empty-state
+   makes 3 RPCs per frame ⇒ ~9 s per frame. Fixed by returning as soon as the
+   buffered bytes parse as JSON. Result: **~1 ms per RPC** (was 3000 ms).
+3. **`serial.read(256)` blocked for the whole 0.5 s timeout** when fewer than
+   256 bytes were pending (the module sends only ~160 B/s), yielding ~1 frame
+   per call. Now reads only what is available (`in_waiting`) and parses
+   anything already buffered first.
+
+Additional robustness work:
+- **`paused_by_us` is persisted** to `/run/presence-agent.paused` (tmpfs). A
+  service restart used to forget that *we* paused, stranding playback paused
+  forever — the agent now resumes correctly after a restart/deploy.
+- **Last-seen hold model** (`PRESENCE_HOLD=4s`): one detection marks presence
+  and holds it, instead of requiring continuous presence. The module's returns
+  are sparse at range (3/30 frames at 1.5 m), so the old continuous-debounce
+  logic could pause but never resume.
+- **`RadarReader` self-heals**: a `SerialException` (e.g. a second process
+  opening the port) now closes and reopens instead of spinning blind forever.
+- **Diagnostics discipline**: never open `/dev/ttyS4` while the service runs —
+  a second reader wedges the agent's port (`readiness to read but returned no
+  data`). Stop the service first, or use `RADAR_DEBUG=1` on the agent itself.
+
+**Distance-byte finding**: with the user ~3 m from the radar the byte read
+54–163, so it is **not** a linear centimetre value at range (near-field reads
+were consistent: ~74-78 at arm's length, 121-194 seated). The presence flag is
+what the agent gates on; `MAX_DISTANCE` (300) is effectively permissive.
+
+**Verified behaviour** (journal):
+```
+19:25:11 EMPTY (no presence for 5.1s)  -> 19:25:16 POLICY: paused player 0
+19:25:48 PRESENT dist=163              -> 19:25:48 POLICY: resumed player 0
+19:26:16 EMPTY (no presence for 5.1s)  -> 19:26:17 POLICY: paused player 0
+```
+i.e. 5 s of no presence pauses whatever is playing; a single detection resumes
+it. User confirmed working.
