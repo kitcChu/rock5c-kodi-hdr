@@ -1,5 +1,5 @@
 [Unit]
-Description=Presence agent (RD-03D radar + C922 presence gating)
+Description=Presence agent (HKL-LD2450 radar -> pause/resume on room occupancy)
 # Never let presence work disturb Kodi:
 After=multi-user.target
 Wants=multi-user.target

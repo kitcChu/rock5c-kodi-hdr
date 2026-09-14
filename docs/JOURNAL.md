@@ -872,3 +872,47 @@ rkvdec2 reset loops + DRM "plane invisible" errors while kodi retried.
 **Lesson**: the "frozen movie + decoder resets" was collateral — the video
 pipeline stalls on A/V sync while the audio sink can't open. Always check the
 audio sink first when video freezes with no obvious decoder fault.
+
+## 33. Presence agent live on HKL-LD2450 — antenna was the missing piece (2026-09-14)
+
+**The big one**: the HKL-LD2450 ships with an **external antenna** that had
+never been connected. A 24GHz radar running into an unmatched bare connector
+is nearly blind (and risks PA damage from reflected power). That single
+omission explains the whole "DOA / intermittent" history of §28-30: weak
+detections only when something very close reflected strongly, plus random
+seeming "blind" windows. **Always fit the antenna before powering these
+modules.**
+
+Measured behaviour after fitting the antenna (three 600 s captures):
+- Static presence: solid, stable readings (e.g. D=121 for 15 s, D=178 for
+  ~7 s, D=194 for 20 s) — a still person is detected, not just motion
+- Motion tracking: smooth distance ramps as the person walks (D 20→90→178)
+- Clean idle↔present transitions, ~10 Hz frames, checksums valid
+- **Range ceiling ≈ 1.9 m.** A 3 m position never registered (multiple
+  attempts, on-axis). The raw distance byte is in **cm** (couch ≈ 144-191,
+  hand wave ≈ 74-128).
+- Max observed on any run: 194 cm.
+
+**Agent changes** (`presence-agent/`):
+- `radar_reader.py` rewritten for the real protocol (was still RD-03D):
+  16-byte `AA 10 B0 [P] [D] ... [XOR] 55` frames, XOR of bytes 1-13
+  validated, returns `{present, distance, protocol, raw}`; port `/dev/ttyS4`.
+- `presence_agent.py`:
+  - `DEBOUNCE_EMPTY=5.0` (user requirement), `DEBOUNCE_PRESENT=1.5`
+  - `MAX_DISTANCE=300` (cm) distance gate
+  - **`PAUSE_TYPES=video,audio`** — pauses *whatever* is playing (was
+    video-only, so music kept playing when the user left)
+  - pause now fires as soon as the debounce elapses (previously also gated
+    behind a 5 s log-throttle, delaying it past the 5 s contract)
+  - `kodi_rpc` parses newline/NUL-delimited replies tolerantly — fixes the
+    `json-rpc error: Extra data` spam seen in the journal
+- Service re-enabled: `systemctl enable --now presence-agent`
+
+**Verified**: with music playing and the room empty,
+`18:53:14 POLICY: paused player 0 (room empty)`; live check confirmed
+`is_paused = True`, `active_player = 0`. Resume path fires on 1.5 s of
+presence.
+
+**Known limitation**: because the radar sees ≈2 m, anyone further away reads
+as empty and playback pauses. That is the desired "finish your dinner" nudge
+behaviour, but means a 3 m viewer is treated as absent.
