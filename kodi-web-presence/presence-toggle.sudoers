@@ -1,0 +1,2 @@
+# Web UI toggle for the presence agent (scoped to this one service)
+radxa ALL=(root) NOPASSWD: /usr/bin/systemctl start presence-agent, /usr/bin/systemctl stop presence-agent, /usr/bin/systemctl restart presence-agent, /usr/bin/systemctl is-active presence-agent

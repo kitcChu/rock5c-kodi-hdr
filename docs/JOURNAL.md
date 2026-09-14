@@ -963,3 +963,41 @@ what the agent gates on; `MAX_DISTANCE` (300) is effectively permissive.
 ```
 i.e. 5 s of no presence pauses whatever is playing; a single detection resumes
 it. User confirmed working.
+
+## 35. Presence agent made an opt-in web toggle — default OFF (2026-09-14)
+
+While the presence tuning is unfinished (sparse returns at range: the user has
+to sit within ~1 m for the agent to keep playback going, see §34), the feature
+became a **toggle in the Kodi web UI, off by default**.
+
+**Behaviour**
+- `presence-agent.service` is **stopped and disabled** — it does not run on
+  boot. Nothing pauses playback unless asked.
+- Web UI nav now has **Presence** (next to **Restart**): a click toggles the
+  service and shows the result as a Kodi on-screen notification
+  (`ON - pauses playback when the room is empty` /
+  `OFF - playback will not be paused`).
+- Turning it **OFF releases playback** if the agent had paused it (checks
+  `/run/presence-agent.paused`), so disabling can never strand audio paused.
+  This bit us during implementation: the agent had paused the music while the
+  user was at dinner; switching off resumed it.
+
+**Implementation** (`kodi-web-presence/`)
+- `script.presence-toggle` addon: `systemctl is-active` → start/stop, then a
+  Kodi notification; also clears the paused latch and resumes playback.
+- `presence-toggle.sudoers`: passwordless `start|stop|restart|is-active` of
+  **just** `presence-agent.service`.
+- Web button: same pattern as §31 (nav item + inline handler →
+  `Addons.ExecuteAddon`); idempotent patch, `index.html.bak2` kept.
+- `deploy.sh` takes `SKIP_KODI_RESTART=1` (don't interrupt playback) and a
+  configurable `REMOTE_SUDO` (this board has no key auth, so the default
+  `sudo -n` needs `REMOTE_SUDO='echo PW | sudo -S'`).
+
+**State after deploy**: agent inactive + disabled; page serves both buttons;
+`script.restart-kodi` registered; `script.presence-toggle` registers on the
+next Kodi restart — the existing **Restart** button covers that without SSH.
+
+**Tuning already applied** (service drop-in
+`presence-agent.service.d/tuning.conf`): `PRESENCE_HOLD=10`,
+`DEBOUNCE_EMPTY=12` — tolerant enough not to false-pause at the user's seat
+while the gap measurement (deferred, dinner) is still pending.
