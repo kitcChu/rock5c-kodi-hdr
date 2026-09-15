@@ -1001,3 +1001,14 @@ next Kodi restart — the existing **Restart** button covers that without SSH.
 `presence-agent.service.d/tuning.conf`): `PRESENCE_HOLD=10`,
 `DEBOUNCE_EMPTY=12` — tolerant enough not to false-pause at the user's seat
 while the gap measurement (deferred, dinner) is still pending.
+
+## 28. Fan mystery solved (2026-08-20) — was never broken
+
+Rock 5C pwm-fan is a kernel thermal cooling device (cdev5, 5 states) bound
+to soc-thermal zone0. Stock trip = 60°C: movies (VPU decode) never cross it
+→ "fan never spins". Boot blip = PWM pin float before driver probe;
+shutdown roar = pin released at poweroff floats high. Fix: runtime trip
+write works (sysfs, lost at reboot) — fan-trip.service sets 55000 at boot.
+Verified end-to-end: trip 40°C test spun fan to state 4; at 55°C idle it
+stays silent. Lesson: `printf | echo | sudo tee` pipes write EMPTY files —
+scp then cp instead.

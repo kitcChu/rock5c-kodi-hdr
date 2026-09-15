@@ -1,0 +1,10 @@
+[Unit]
+Description=pwm-fan trip 55C (soc-thermal zone0, cdev5)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 55000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp'
+
+[Install]
+WantedBy=multi-user.target
