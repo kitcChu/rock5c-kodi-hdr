@@ -1012,3 +1012,11 @@ write works (sysfs, lost at reboot) — fan-trip.service sets 55000 at boot.
 Verified end-to-end: trip 40°C test spun fan to state 4; at 55°C idle it
 stays silent. Lesson: `printf | echo | sudo tee` pipes write EMPTY files —
 scp then cp instead.
+
+## 29. Backup schedule + found hole (2026-10-22)
+
+rock5c-backup.timer rescheduled 04:30 → 13:55 daily (Persistent=true kept).
+Discovered: soft CIFS mount drops after NAS hiccup/power cycle → scheduled
+runs exit cleanly ("share up?") with systemd Result=success — silent no-op.
+No October tar existed despite timer "success" at boot. Proposed fix
+(pending approval): x-systemd.automount on fstab entry.

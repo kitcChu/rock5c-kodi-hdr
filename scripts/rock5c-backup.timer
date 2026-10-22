@@ -1,0 +1,7 @@
+[Unit]
+Description=Daily rock5c backup
+[Timer]
+OnCalendar=*-*-* 13:55:00
+Persistent=true
+[Install]
+WantedBy=timers.target
