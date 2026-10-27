@@ -1020,3 +1020,16 @@ Discovered: soft CIFS mount drops after NAS hiccup/power cycle → scheduled
 runs exit cleanly ("share up?") with systemd Result=success — silent no-op.
 No October tar existed despite timer "success" at boot. Proposed fix
 (pending approval): x-systemd.automount on fstab entry.
+
+## 30. SD boot-sector repair (2026-10-27) — Pi write test wiped GPT
+
+C922-voice-test day: card had been in a Raspberry Pi; a write-perf test
+zeroed LBA0-33 (MBR code + primary GPT header + entries) AND the backup
+GPT at card tail. macOS exposed a stale pre-GPT MBR (bogus 1MB offsets).
+Forensics via head/tail dumps + byte-diff vs rock5c-sd64-20260819 master:
+idbloader@64 and u-boot@16384 INTACT; damage total ~20KB head + tail GPT.
+Repair: wrote head 16MB + tail 512KB from master (dd bs=1m count=16 /
+bs=524288 seek=121811). Post-write diff = 0 bytes both ranges; GPT OK.
+Zero data loss; the 13:55 auto-backup covered the gap regardless.
+LESSON: never raw-write-test a flashed system card; and the master image
++ core tar + GitHub releases triple made this a 20-minute fix.
