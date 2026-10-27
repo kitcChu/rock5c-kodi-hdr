@@ -1033,3 +1033,16 @@ bs=524288 seek=121811). Post-write diff = 0 bytes both ranges; GPT OK.
 Zero data loss; the 13:55 auto-backup covered the gap regardless.
 LESSON: never raw-write-test a flashed system card; and the master image
 + core tar + GitHub releases triple made this a 20-minute fix.
+
+## 31. Post-repair boot hang fixed (2026-10-27)
+
+After §30 repair, boot stalled >1 min: fstab still demanded /config
+(E3D9-5CF0) + /boot/efi (E3D9-B23C) vfat — both filesystems destroyed by
+the earlier failed Pi repair attempt (which wrote its own MBR + fake FATs
+at wrong offsets). No nofail + fsck passno=2 → systemd waited full device
+timeout, multi-user.target blocked (fan-trip, timers behind it). Fix:
+nofail,x-systemd.automount + passno 0 on both lines; masked
+systemd-boot-update.service (sd-boot updater, meaningless on u-boot).
+Board: running, 0 failed, kodi active, trip 55000, timer active.
+Note: /config + /boot/efi permanently gone (p1/p2 raw) — boot path
+(u-boot raw + extlinux/rootfs) proven independent of them.
