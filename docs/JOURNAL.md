@@ -1046,3 +1046,9 @@ systemd-boot-update.service (sd-boot updater, meaningless on u-boot).
 Board: running, 0 failed, kodi active, trip 55000, timer active.
 Note: /config + /boot/efi permanently gone (p1/p2 raw) — boot path
 (u-boot raw + extlinux/rootfs) proven independent of them.
+
+Follow-up: dead fstab lines commented out entirely (nofail still let the
+device job burn the 90s timeout at boot finish). Cold boot now: kodi
+screen ~10s. Note: JSON-RPC checks must use http://:8080/jsonrpc with
+webserver auth (admin/... in guisettings) — port 9090 is the raw TCP
+socket, HTTP curls to it silently drop.
