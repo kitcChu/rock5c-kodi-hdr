@@ -1052,3 +1052,22 @@ device job burn the 90s timeout at boot finish). Cold boot now: kodi
 screen ~10s. Note: JSON-RPC checks must use http://:8080/jsonrpc with
 webserver auth (admin/... in guisettings) — port 9090 is the raw TCP
 socket, HTTP curls to it silently drop.
+
+## 32. 16GB system-card attempt FAILED (2026-10-27/28) — card incompatibility
+
+Goal: 16GB spare system card. Recipe (worked): ddrescue -d rescued the Pi
+card (plain dd hit I/O wall at 6.4GB on TWO readers — direct I/O read
+through it clean, 100%, 0 bad sectors; the "failing sectors" were a USB
+bridge cache artifact), gzipped to NAS, then rebuilt sda: boot chain
+(sector 64-32767 from live mmcblk1), fresh GPT (p1 16MB/p2 300MB/p3
+14.3GB), mkfs.ext4 with SAME root UUID (fstab/extlinux zero-edit),
+rsync -aHAX live rootfs (9.7GB). The clone even RAN THE WHOLE SYSTEM
+overnight via USB reader (UUID collision resolved to sda3 — harmless
+surprise). But standalone SD boot: BootROM reads (blue LED flicker),
+SPL never proceeds, no display, no network — with BIT-IDENTICAL boot
+chain (verified md5 after env re-copy). Verdict: physical card
+incompatible with RK3588S2 SD controller. Stock 16GB cards need not
+apply. Verified boot-chain re-copy technique + rootfs proven. Next
+attempt (any new A1/A2 card) = repeat stage3a/3b, ~30 min.
+Also: fstab dead vfat lines removed; kodi JSON-RPC = 8080 HTTP with
+auth (9090 is raw TCP; HTTP curls silently drop).
