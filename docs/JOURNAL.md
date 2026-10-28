@@ -1071,3 +1071,11 @@ apply. Verified boot-chain re-copy technique + rootfs proven. Next
 attempt (any new A1/A2 card) = repeat stage3a/3b, ~30 min.
 Also: fstab dead vfat lines removed; kodi JSON-RPC = 8080 HTTP with
 auth (9090 is raw TCP; HTTP curls silently drop).
+
+§32 addendum: Pi image restored onto the 16GB card via nohup dd
+(70MB/s, exact byte count). Full-card md5 verification IMPOSSIBLE on
+this card+reader: two direct reads gave different hashes, neither
+matching the source — card electrically marginal after ~5 rewrites.
+Structural + content verification passed (bootfs/rootfs labels, MBR,
+hostname kitPI4). Card returned to Pi duty; final judge = Pi boot.
+Reader distrust note: same bridge produced the phantom 6.4GB wall.
